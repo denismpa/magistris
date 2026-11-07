@@ -905,7 +905,7 @@ actor LiveScoreRenderSession {
 
     #if !os(Android)
     func handwritingTargetForSelection() throws -> ScoreHandwritingTarget {
-        let state = try bridgeSession.currentEditingState()
+        let state = try bridgeSession.currentEditState()
         let target = try bridgeSession.handwritingContext(voice: state.currentVoice)
         return ScoreHandwritingTarget(
             token: target.token,
