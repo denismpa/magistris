@@ -532,6 +532,87 @@ isEditableText:(BOOL)isEditableText
 
 @end
 
+@interface MSRHandwritingEventInfo : NSObject
+
+@property (nonatomic, readonly) NSInteger offsetTicks;
+@property (nonatomic, readonly) NSInteger durationCode;
+@property (nonatomic, readonly) NSInteger dots;
+@property (nonatomic, readonly) NSInteger staffLine;
+@property (nonatomic, readonly) NSInteger accidentalKind;
+@property (nonatomic, readonly) BOOL rest;
+
+- (instancetype)initWithOffsetTicks:(NSInteger)offsetTicks
+                       durationCode:(NSInteger)durationCode
+                       dots:(NSInteger)dots
+                       staffLine:(NSInteger)staffLine
+                       accidentalKind:(NSInteger)accidentalKind
+                       rest:(BOOL)rest NS_DESIGNATED_INITIALIZER;
+
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)new NS_UNAVAILABLE;
+
+@end
+
+@interface MSRHandwritingContextInfo : NSObject
+
+@property (nonatomic, copy, readonly) NSString * token;
+@property (nonatomic, readonly) NSInteger pageIndex;
+@property (nonatomic, readonly) NSInteger measureIndex;
+@property (nonatomic, readonly) NSInteger staffIndex;
+@property (nonatomic, readonly) NSInteger voice;
+@property (nonatomic, readonly) int64_t measureStartTick;
+@property (nonatomic, readonly) NSInteger durationTicks;
+@property (nonatomic, readonly) NSInteger timeSignatureNumerator;
+@property (nonatomic, readonly) NSInteger timeSignatureDenominator;
+@property (nonatomic, copy, readonly) NSString * clef;
+@property (nonatomic, readonly) NSInteger key;
+@property (nonatomic, strong, readonly) MSRNormalizedRectInfo * measureRect;
+@property (nonatomic, readonly) double staffTopNormalizedY;
+@property (nonatomic, readonly) double staffHalfStepNormalizedY;
+@property (nonatomic, readonly) double inputStartNormalizedX;
+@property (nonatomic, readonly) double inputEndNormalizedX;
+
+- (instancetype)initWithToken:(NSString *)token
+                       pageIndex:(NSInteger)pageIndex
+                       measureIndex:(NSInteger)measureIndex
+                       staffIndex:(NSInteger)staffIndex
+                       voice:(NSInteger)voice
+                       measureStartTick:(int64_t)measureStartTick
+                       durationTicks:(NSInteger)durationTicks
+                       timeSignatureNumerator:(NSInteger)timeSignatureNumerator
+                       timeSignatureDenominator:(NSInteger)timeSignatureDenominator
+                       clef:(NSString *)clef
+                       key:(NSInteger)key
+                       measureRect:(MSRNormalizedRectInfo *)measureRect
+                       staffTopNormalizedY:(double)staffTopNormalizedY
+                       staffHalfStepNormalizedY:(double)staffHalfStepNormalizedY
+                       inputStartNormalizedX:(double)inputStartNormalizedX
+                       inputEndNormalizedX:(double)inputEndNormalizedX NS_DESIGNATED_INITIALIZER;
+
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)new NS_UNAVAILABLE;
+
+@end
+
+@interface MSRPercussionInstrumentInfo : NSObject
+
+@property (nonatomic, readonly) NSInteger midiPitch;
+@property (nonatomic, copy, readonly) NSString *name;
+@property (nonatomic, readonly) NSInteger staffLine;
+@property (nonatomic, readonly) NSInteger voice;
+@property (nonatomic, readonly) NSInteger notehead;
+
+- (instancetype)initWithMIDIPitch:(NSInteger)midiPitch
+                             name:(NSString *)name
+                        staffLine:(NSInteger)staffLine
+                            voice:(NSInteger)voice
+                         notehead:(NSInteger)notehead NS_DESIGNATED_INITIALIZER;
+
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)new NS_UNAVAILABLE;
+
+@end
+
 @interface MSREditState : NSObject
 
 @property (nonatomic, strong, readonly, nullable) MSRSelectionInfo *selection;
@@ -544,6 +625,7 @@ isEditableText:(BOOL)isEditableText
 @property (nonatomic, readonly) BOOL canUndo;
 @property (nonatomic, readonly) BOOL canRedo;
 @property (nonatomic, readonly) BOOL activeStaffIsPercussion;
+@property (nonatomic, copy, readonly) NSArray<MSRPercussionInstrumentInfo *> *percussionInstruments;
 @property (nonatomic, readonly) BOOL createMultiMeasureRests;
 @property (nonatomic, readonly) BOOL hideEmptyStaves;
 @property (nonatomic, readonly) double pageWidthMillimeters;
@@ -562,6 +644,7 @@ isEditableText:(BOOL)isEditableText
                            canUndo:(BOOL)canUndo
                            canRedo:(BOOL)canRedo
              activeStaffIsPercussion:(BOOL)activeStaffIsPercussion
+               percussionInstruments:(NSArray<MSRPercussionInstrumentInfo *> *)percussionInstruments
              createMultiMeasureRests:(BOOL)createMultiMeasureRests
                       hideEmptyStaves:(BOOL)hideEmptyStaves
               pageWidthMillimeters:(double)pageWidthMillimeters
@@ -750,6 +833,14 @@ isEditableText:(BOOL)isEditableText
 - (nullable MSREditState *)updateKeySignature:(NSInteger)keyValue
                                     fromStart:(BOOL)fromStart
                                         error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(updateKeySignature(_:fromStart:));
+- (nullable MSRHandwritingContextInfo *)handwritingContextForVoice:(NSInteger)voice
+                                                           error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(handwritingContext(voice:));
+- (nullable MSRRenderedPage *)previewHandwritingWithTargetToken:(NSString *)targetToken
+                                                       events:(NSArray<MSRHandwritingEventInfo *> *)events
+                                                        error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(previewHandwriting(targetToken:events:));
+- (nullable MSREditState *)applyHandwritingWithTargetToken:(NSString *)targetToken
+                                                  events:(NSArray<MSRHandwritingEventInfo *> *)events
+                                                   error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(applyHandwriting(targetToken:events:));
 - (nullable MSREditState *)insertNoteAtPageIndex:(NSInteger)pageIndex
                                      normalizedX:(double)normalizedX
                                      normalizedY:(double)normalizedY
@@ -765,6 +856,11 @@ isEditableText:(BOOL)isEditableText
                                       pitchClass:(NSInteger)pitchClass
                                      preferFlats:(BOOL)preferFlats
                                            error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(insertNote(pageIndex:normalizedX:normalizedY:pitchClass:preferFlats:));
+- (nullable MSREditState *)insertPercussionNoteAtPageIndex:(NSInteger)pageIndex
+                                              normalizedX:(double)normalizedX
+                                              normalizedY:(double)normalizedY
+                                                midiPitch:(NSInteger)midiPitch
+                                                    error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(insertPercussionNote(pageIndex:normalizedX:normalizedY:midiPitch:));
 - (nullable MSREditState *)insertPitchAtCursor:(NSInteger)pitchClass
                                    preferFlats:(BOOL)preferFlats
                              addToCurrentChord:(BOOL)addToCurrentChord
@@ -785,6 +881,12 @@ isEditableText:(BOOL)isEditableText
                                                              rest:(BOOL)rest
                                                    accidentalKind:(NSInteger)accidentalKind
                                                             error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(noteEntryPreview(pageIndex:normalizedX:normalizedY:durationCode:rest:accidentalKind:));
+- (nullable MSRNoteEntryPreviewInfo *)percussionNoteEntryPreviewAtPageIndex:(NSInteger)pageIndex
+                                                               normalizedX:(double)normalizedX
+                                                               normalizedY:(double)normalizedY
+                                                              durationCode:(NSInteger)durationCode
+                                                                 midiPitch:(NSInteger)midiPitch
+                                                                     error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(percussionNoteEntryPreview(pageIndex:normalizedX:normalizedY:durationCode:midiPitch:));
 - (nullable MSREditState *)deleteSelectionWithError:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(deleteSelection());
 - (nullable MSREditState *)clearSelectedMeasureWithError:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(clearSelectedMeasure());
 - (nullable MSREditState *)removeSelectedMeasureWithError:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(removeSelectedMeasure());

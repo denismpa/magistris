@@ -675,6 +675,53 @@ enum ScoreEditRefreshScope: String, Sendable, Equatable {
     case all
 }
 
+struct ScorePercussionInstrument: Sendable, Equatable, Identifiable {
+    let midiPitch: Int
+    let name: String
+    let staffLine: Int
+    let voice: Int
+    let notehead: Int
+
+    var id: Int { midiPitch }
+}
+
+#if !os(Android)
+struct ScoreHandwritingEvent: Sendable, Equatable {
+    var offsetTicks = -1
+    var durationCode: Int
+    var dots = 0
+    var staffLine: Int
+    var accidentalKind = -1
+    var rest: Bool
+}
+
+struct ScoreHandwritingTarget: Sendable, Equatable {
+    let token: String
+    let pageIndex: Int
+    let measureIndex: Int
+    let staffIndex: Int
+    let voice: Int
+    let measureStartTick: Int64
+    let durationTicks: Int
+    let timeSignatureNumerator: Int
+    let timeSignatureDenominator: Int
+    let clef: String
+    let key: Int
+    let measureRect: ScoreNormalizedRect
+    let staffTopNormalizedY: Double
+    let staffHalfStepNormalizedY: Double
+    let inputStartNormalizedX: Double
+    let inputEndNormalizedX: Double
+}
+
+struct ScoreHandwritingPreview: Sendable {
+    let pageIndex: Int
+    let pixelWidth: Int
+    let pixelHeight: Int
+    let imageData: Data
+}
+#endif
+
 struct ScoreEditingState: Sendable, Equatable {
     var selection: ScoreSelectedElement?
     var noteInputEnabled: Bool
@@ -686,6 +733,7 @@ struct ScoreEditingState: Sendable, Equatable {
     var canUndo: Bool
     var canRedo: Bool
     var activeStaffIsPercussion: Bool
+    var percussionInstruments: [ScorePercussionInstrument] = []
     var createMultiMeasureRests: Bool
     var hideEmptyStaves: Bool
     var staffSpacingSpatium: Double

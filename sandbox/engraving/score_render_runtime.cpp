@@ -1391,6 +1391,22 @@ bool isStandardStaff(const mu::engraving::Staff* staff, const mu::engraving::Fra
     return staff && !staff->isTabStaff(tick) && !staff->isDrumStaff(tick);
 }
 
+const mu::engraving::Drumset* drumsetForStaff(const mu::engraving::Staff* staff, const mu::engraving::Fraction& tick)
+{
+    if (!staff || staff->isTabStaff(tick)) {
+        return nullptr;
+    }
+
+    const mu::engraving::Instrument* instrument = staff->part()->instrument(tick);
+    return instrument->useDrumset() ? instrument->drumset() : nullptr;
+}
+
+bool isValidPercussionPitch(const mu::engraving::Drumset& drumset, const int pitch)
+{
+    return drumset.isValid(pitch) && drumset.noteHead(pitch) != mu::engraving::NoteHeadGroup::HEAD_INVALID
+           && drumset.voice(pitch) >= 0 && drumset.voice(pitch) < static_cast<int>(mu::engraving::VOICES);
+}
+
 std::string layoutBreakKind(const mu::engraving::LayoutBreak* layoutBreak)
 {
     if (!layoutBreak) {
@@ -2145,9 +2161,10 @@ bool selectedMeasureRangeHasVoiceOneContent(const mu::engraving::Score* score,
     return false;
 }
 
-mu::engraving::ChordRest* firstStandardChordRestInMeasure(const mu::engraving::Score* score,
+mu::engraving::ChordRest* firstNoteInputChordRestInMeasure(const mu::engraving::Score* score,
                                                           mu::engraving::Measure* measure,
-                                                          const mu::engraving::staff_idx_t preferredStaff = muse::nidx)
+                                                          const mu::engraving::staff_idx_t preferredStaff,
+                                                           const bool allowPercussion)
 {
     if (!score || !measure) {
         return nullptr;
@@ -2167,7 +2184,7 @@ mu::engraving::ChordRest* firstStandardChordRestInMeasure(const mu::engraving::S
         const mu::engraving::staff_idx_t staffLimit = preferredStaff == muse::nidx ? score->nstaves() : firstStaff + 1;
         for (mu::engraving::staff_idx_t staffIndex = firstStaff; staffIndex < staffLimit; ++staffIndex) {
             const mu::engraving::Staff* staff = score->staff(staffIndex);
-            if (!isStandardStaff(staff, measure->tick())) {
+            if (!isStandardStaff(staff, segment->tick()) && !(allowPercussion && drumsetForStaff(staff, segment->tick()))) {
                 continue;
             }
 
@@ -2186,6 +2203,13 @@ mu::engraving::ChordRest* firstStandardChordRestInMeasure(const mu::engraving::S
     }
 
     return nullptr;
+}
+
+mu::engraving::ChordRest* firstStandardChordRestInMeasure(const mu::engraving::Score* score,
+                                                          mu::engraving::Measure* measure,
+                                                          const mu::engraving::staff_idx_t preferredStaff = muse::nidx)
+{
+    return firstNoteInputChordRestInMeasure(score, measure, preferredStaff, false);
 }
 
 mu::engraving::ChordRest* firstChordRestAtSegment(const mu::engraving::Score* score,
@@ -2264,7 +2288,7 @@ bool selectMeasureRange(mu::engraving::Score* score,
     if (mu::engraving::ChordRest* chordRest = firstChordRestAtSegment(score, startSegment, staffStart)) {
         score->inputState().setTrack(chordRest->track());
         score->inputState().moveInputPos(chordRest);
-    } else if (mu::engraving::ChordRest* chordRest = firstStandardChordRestInMeasure(score, startSegment->measure(), staffStart)) {
+    } else if (mu::engraving::ChordRest* chordRest = firstNoteInputChordRestInMeasure(score, startSegment->measure(), staffStart, true)) {
         score->inputState().setTrack(chordRest->track());
         score->inputState().moveInputPos(chordRest);
     }
@@ -2302,7 +2326,7 @@ void selectMeasureRange(mu::engraving::Score* score,
     score->selection().setRange(startSegment, endSegment, staffStart, staffEnd);
     score->selection().updateSelectedElements();
     score->selection().setActiveTrack(staffStart * mu::engraving::VOICES);
-    if (mu::engraving::ChordRest* chordRest = firstStandardChordRestInMeasure(score, firstMeasure, staffStart)) {
+    if (mu::engraving::ChordRest* chordRest = firstNoteInputChordRestInMeasure(score, firstMeasure, staffStart, true)) {
         score->inputState().setTrack(chordRest->track());
         score->inputState().moveInputPos(chordRest);
     }
@@ -3062,7 +3086,7 @@ mu::engraving::ChordRest* selectedMeasureChordRest(const mu::engraving::Score* s
     }
 
     const mu::engraving::staff_idx_t staffIdx = std::min(score->selection().staffStart(), score->nstaves() - 1);
-    return firstStandardChordRestInMeasure(score, startMeasure, staffIdx);
+    return firstNoteInputChordRestInMeasure(score, startMeasure, staffIdx, true);
 }
 
 mu::engraving::ChordRest* selectedOrMeasureChordRest(const mu::engraving::Score* score)
@@ -3325,6 +3349,89 @@ void normalizePointInputPositionForPutNote(mu::engraving::Staff* staff, mu::engr
     }
 
     position.line -= stepOffset + 2 * staffTypeYOffset / lineDistance;
+}
+
+int percussionPitchForLine(const mu::engraving::Drumset& drumset, const double line)
+{
+    int closestPitch = -1;
+    double closestDistance = std::numeric_limits<double>::infinity();
+    for (int pitch = 0; pitch < mu::engraving::DRUM_INSTRUMENTS; ++pitch) {
+        if (!isValidPercussionPitch(drumset, pitch)) {
+            continue;
+        }
+        const double distance = std::abs(drumset.line(pitch) - line);
+        const bool preferredHeadOnSameLine = closestPitch >= 0 && distance == closestDistance
+            && drumset.line(pitch) == drumset.line(closestPitch)
+            && drumset.noteHead(pitch) == mu::engraving::NoteHeadGroup::HEAD_NORMAL
+            && drumset.noteHead(closestPitch) != mu::engraving::NoteHeadGroup::HEAD_NORMAL;
+        if (distance < closestDistance || preferredHeadOnSameLine) {
+            closestPitch = pitch;
+            closestDistance = distance;
+        }
+    }
+    return closestPitch;
+}
+
+// A drum chosen by name supplies the vertical position. The point still chooses
+// the staff and time. Use the same resolved position for preview and insertion.
+const mu::engraving::Drumset* resolvePercussionPoint(const mu::engraving::Staff* staff,
+                                                     const mu::engraving::PointF& pagePoint,
+                                                     mu::engraving::Position& position,
+                                                     const std::optional<int> requestedPitch,
+                                                     const bool rest,
+                                                     int& pitch)
+{
+    if (!rest) {
+        // Any active drum voice can mark a playable time on the staff.
+        if (mu::engraving::Segment* segment = chordRestSegmentAtPoint(position.segment->measure(), pagePoint, position.staffIdx)) {
+            position.segment = segment;
+            position.pos.rx() = segment->pagePos().x();
+        }
+    }
+
+    const auto tick = position.segment->tick();
+    const mu::engraving::Drumset* drumset = drumsetForStaff(staff, tick);
+    if (!drumset) {
+        return nullptr;
+    }
+
+    const mu::engraving::StaffType* staffType = staff->staffType(tick);
+    const double staffStep = staffType->lineDistance().val() * staff->spatium(tick) * 0.5;
+    const double staffY = position.segment->system()->staffYpage(position.staffIdx);
+    const double staffOffsetY = staffType->yoffset().val() * staff->spatium(tick);
+    const double lineZeroY = staffY + staffOffsetY + staffType->stepOffset() * 2.0 * staffStep;
+    if (!rest) {
+        if (staffStep <= 0.0) {
+            return nullptr;
+        }
+        const double clickedLine = (pagePoint.y() - lineZeroY) / staffStep;
+        pitch = requestedPitch ? *requestedPitch : percussionPitchForLine(*drumset, clickedLine);
+        if (!isValidPercussionPitch(*drumset, pitch)) {
+            return nullptr;
+        }
+    }
+
+    position.line = rest ? staffType->middleLine() : drumset->line(pitch);
+    position.pos.ry() = lineZeroY + position.line * staffStep;
+    return drumset;
+}
+
+bool percussionTrackIsEditable(mu::engraving::Score* score,
+                                const mu::engraving::track_idx_t track,
+                                const bool needsMappedVoice)
+{
+    mu::engraving::Excerpt* excerpt = score->excerpt();
+    if (!excerpt) {
+        return true;
+    }
+    const auto& tracks = excerpt->tracksMapping();
+    if (tracks.empty()) {
+        return true;
+    }
+    const auto sourceTrack = muse::key(tracks, track, muse::nidx);
+    // The engine uses the drumset's voice index for notes. A part that hides
+    // voices can shift indices, so don't write to a different source voice.
+    return sourceTrack != muse::nidx && (!needsMappedVoice || sourceTrack % mu::engraving::VOICES == track % mu::engraving::VOICES);
 }
 
 bool biasDuplicatePointInputAwayFromExistingChord(mu::engraving::Score* score,
@@ -5050,12 +5157,24 @@ msr::render::ScoreEditState makeEditState(const mu::engraving::Score* score, con
     } else {
         editState.currentVoice = static_cast<int>(inputState.voice());
     }
-    if (inputState.noteEntryMode()) {
-        const mu::engraving::Staff* staff = inputState.staff();
-        editState.activeStaffIsPercussion = staff && staff->isDrumStaff(inputState.tick());
-    } else if (const mu::engraving::ChordRest* chordRest = selectedChordRest(score)) {
-        const mu::engraving::Staff* staff = score->staff(chordRest->staffIdx());
-        editState.activeStaffIsPercussion = staff && staff->isDrumStaff(chordRest->tick());
+    const mu::engraving::Staff* entryStaff = inputState.noteEntryMode() ? inputState.staff() : nullptr;
+    mu::engraving::Fraction entryTick = inputState.tick();
+    if (!entryStaff) {
+        if (const mu::engraving::ChordRest* chordRest = selectedOrMeasureChordRest(score)) {
+            entryStaff = score->staff(chordRest->staffIdx());
+            entryTick = chordRest->tick();
+        }
+    }
+    editState.activeStaffIsPercussion = entryStaff && !entryStaff->isTabStaff(entryTick) && entryStaff->isDrumStaff(entryTick);
+    if (const mu::engraving::Drumset* drumset = drumsetForStaff(entryStaff, entryTick)) {
+        for (int pitch = 0; pitch < mu::engraving::DRUM_INSTRUMENTS; ++pitch) {
+            if (isValidPercussionPitch(*drumset, pitch)) {
+                editState.percussionInstruments.push_back({
+                    pitch, drumset->translatedName(pitch).toStdString(), drumset->line(pitch),
+                    drumset->voice(pitch), static_cast<int>(drumset->noteHead(pitch))
+                });
+            }
+        }
     }
     editState.canUndo = score->undoStack() && score->undoStack()->canUndo();
     editState.canRedo = score->undoStack() && score->undoStack()->canRedo();

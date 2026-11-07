@@ -162,7 +162,6 @@ struct ScoreReaderPageCanvas: View {
     let measureRangePreviewAction: (CGPoint, CGPoint) -> Void
     let measureRangePreviewEndAction: () -> Void
     let measureRangeDragAction: (CGPoint, CGPoint) -> Void
-    let pencilInsertionFineTuneAction: (CGPoint, CGPoint) -> Void
     let pencilHoverPreviewAction: (CGPoint?) -> Void
     let pencilInteractionStartAction: () -> Void
     let pencilDoubleTapAction: () -> Void
@@ -252,7 +251,6 @@ struct ScoreReaderPageCanvas: View {
                 measureRangePreviewAction: measureRangePreviewAction,
                 measureRangePreviewEndAction: measureRangePreviewEndAction,
                 measureRangeDragAction: measureRangeDragAction,
-                pencilInsertionFineTuneAction: pencilInsertionFineTuneAction,
                 pencilHoverPreviewAction: pencilHoverPreviewAction,
                 pencilInteractionStartAction: pencilInteractionStartAction,
                 pencilDoubleTapAction: pencilDoubleTapAction,
@@ -489,7 +487,6 @@ struct ScoreReaderPageSurface: View {
     let measureRangePreviewAction: (CGPoint, CGPoint) -> Void
     let measureRangePreviewEndAction: () -> Void
     let measureRangeDragAction: (CGPoint, CGPoint) -> Void
-    let pencilInsertionFineTuneAction: (CGPoint, CGPoint) -> Void
     let pencilHoverPreviewAction: (CGPoint?) -> Void
     let pencilInteractionStartAction: () -> Void
     let pencilDoubleTapAction: () -> Void
@@ -546,7 +543,6 @@ struct ScoreReaderPageSurface: View {
                         onMeasureRangePreview: measureRangePreviewAction,
                         onMeasureRangePreviewEnd: measureRangePreviewEndAction,
                         onMeasureRangeDrag: measureRangeDragAction,
-                        onPencilInsertionFineTune: pencilInsertionFineTuneAction,
                         onPencilHoverPreview: pencilHoverPreviewAction,
                         onPencilInteractionStart: pencilInteractionStartAction,
                         onPencilDoubleTap: pencilDoubleTapAction,

@@ -427,6 +427,61 @@ struct MuseReaderiOSTests {
     }
 
     @Test
+    @MainActor
+    func pencilTapSlopUsesTheDistanceInScreenPoints() {
+        let start = CGPoint(x: 100, y: 200)
+        #expect(!ScorePencilGestureMovement.exceedsTapSlop(from: start, to: CGPoint(x: 103, y: 204)))
+        #expect(ScorePencilGestureMovement.exceedsTapSlop(from: start, to: CGPoint(x: 104, y: 204)))
+    }
+
+    @Test
+    @MainActor
+    func firstPencilTapWaitsForNoteInputActivationAndDuration() async throws {
+        let fixture = fixtureURL(
+            "MuseReaderiOS/MuseReaderiOS/Resources/ScoreTemplates.bundle/Blank/01-Treble_Clef.mscx"
+        )
+        let scoreURL = try writeTemporaryFile(named: "Pencil Entry.mscx", data: Data(contentsOf: fixture))
+        let session = try await MuseScoreSessionService().openSession(at: scoreURL)
+        let renderSession = try #require(session.liveRenderSession)
+        let regions = try await renderSession.playbackMeasureRegions()
+        let beats = try await renderSession.playbackBeatPoints()
+        let measure = try #require(regions.first)
+        let beat = try #require(beats.first)
+        let reader = ScoreReaderState(session: session, initialPageIndex: beat.pageIndex, initialInteractionMode: .edit)
+        defer { reader.shutdown() }
+
+        // The tap and duration choice are accepted before the engine responds
+        // to entering note mode, as with a fast tap on a Pencil without hover.
+        #expect(reader.activatePencilNoteEntry())
+        reader.applyDuration(.eighth)
+        reader.handlePageTap(
+            pageIndex: beat.pageIndex,
+            normalizedPoint: CGPoint(x: beat.normalizedX, y: measure.normalizedRect.center.y),
+            inputKind: .pencil
+        )
+        await reader.editingCommandTask?.value
+
+        #expect(reader.editingErrorMessage == nil)
+        #expect(reader.editingState.canUndo)
+        #expect(reader.editingState.selection?.kind == .note)
+        #expect(reader.editingState.selection?.duration == .eighth)
+
+        // A Pencil rest choice arms the next placement instead of making
+        // another undoable edit at the cursor as keyboard entry would.
+        let previousSelection = reader.editingState.selection
+        reader.toggleRest()
+        await reader.editingCommandTask?.value
+        #expect(reader.editingState.noteInputInsertsRests)
+        #expect(reader.editingState.selection?.tick == previousSelection?.tick)
+        #expect(reader.editingState.selection?.kind == previousSelection?.kind)
+
+        reader.undoEdit()
+        await reader.editingCommandTask?.value
+        #expect(!reader.editingState.canUndo)
+        #expect(reader.editingState.canRedo)
+    }
+
+    @Test
     func setlistDisplaySortingAndSearchProduceStableVisibleSequence() {
         let older = testRecentDocument(
             id: "older",

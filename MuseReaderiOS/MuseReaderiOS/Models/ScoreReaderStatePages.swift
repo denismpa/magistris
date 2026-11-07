@@ -269,6 +269,7 @@ extension ScoreReaderState {
 
         let temporaryViewKey = viewTransposeKey != viewTransposeSourceKey ? viewTransposeKey : nil
 
+        clearNoteEntryPreview()
         partSelectionTask?.cancel()
         partSelectionRevision += 1
         let selectionRevision = partSelectionRevision
@@ -303,6 +304,9 @@ extension ScoreReaderState {
 
         let selectionTask = Task { @MainActor [weak self] in
             do {
+                // Finish accepted point-entry commands while their score part is still active.
+                await self?.editingCommandTask?.value
+                try Task.checkCancellation()
                 var updatedPageCount: Int
                 if let index {
                     updatedPageCount = try await liveRenderSession.setActivePart(index: index)

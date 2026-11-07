@@ -1,12 +1,16 @@
-# Aria
+# Magistris
 
-Aria is a score reader and editor for MuseScore and MusicXML files on iPhone, iPad, and Android phones and tablets. It combines a touch-oriented library and editor with a MuseScore Studio-derived render core for notation, playback, saving, and export.
+Magistris is an iPad sheet music editor based on [Aria](https://github.com/hdi200/aria), named in tribute to my music teachers. It opens and edits MuseScore and MusicXML scores. It combines a touch-oriented library and editor with a MuseScore Studio-derived render core for notation, playback, saving, and export.
 
 Aria is not affiliated with, sponsored by, or endorsed by MuseScore, Muse Group, or MuseScore Studio. MuseScore names are used descriptively to identify supported file formats and the upstream codebase this project derives from.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
 
-## Get the App
+## Get Magistris
+
+See the [iPadOS build and installation guide](docs/aria-ipados-validation.md) to install this fork.
+
+## Upstream Aria
 
 - [App Store — iPhone and iPad](https://apps.apple.com/app/id6779437781): iOS/iPadOS 17 or later.
 - [Google Play — Android](https://play.google.com/store/apps/details?id=com.hdi200.ariascore): Android 9 (Pie/API 28) or later, on 64-bit ARM devices.
@@ -32,7 +36,7 @@ This checkout contains the iOS and Android apps, their shared Swift code, and th
 
 ## Supported Files
 
-Aria can import and open:
+Magistris can import and open these formats.
 
 - `.mscz`
 - `.mscx`
@@ -44,7 +48,7 @@ The app autosaves supported edits to its managed score file. On iOS, imported sc
 
 ## MuseScore Compatibility
 
-The render core uses MuseScore Studio **4.7.5**, with Aria patches, and saves genuine **4.70-format** scores for desktop MuseScore Studio compatibility. Engine provenance, patches, and upgrade instructions are documented in [ENGINE.md](sandbox/engraving/compat/ENGINE.md); compatibility checks are in the [compatibility README](sandbox/engraving/compat/README.md).
+The render core uses MuseScore Studio **4.7.6**, with Aria patches, and saves genuine **4.70-format** scores for desktop MuseScore Studio compatibility. Engine provenance, patches, and upgrade instructions are documented in [ENGINE.md](sandbox/engraving/compat/ENGINE.md); compatibility checks are in the [compatibility README](sandbox/engraving/compat/README.md).
 
 ## Architecture
 
@@ -67,8 +71,8 @@ The Android app reuses the shared Swift logic and SwiftUI views through Skip Fus
 This repository uses Git LFS for the required iOS SoundFont:
 
 ```sh
-git clone https://github.com/hdi200/aria.git
-cd aria
+git clone --branch feature/percussion-editing https://github.com/denismpa/magistris.git
+cd magistris
 git lfs pull
 ```
 
@@ -83,7 +87,9 @@ wc -c MuseReaderiOS/MuseReaderiOS/Resources/MuseScore_General.sf2
 
 ## iOS Build Requirements
 
-- macOS with Xcode and the iOS SDK.
+See the [iPadOS validation guide](docs/aria-ipados-validation.md) for device and distribution builds.
+
+- macOS with Xcode and the iOS 27.1 SDK or later.
 - CMake.
 - Ninja.
 - Git LFS.

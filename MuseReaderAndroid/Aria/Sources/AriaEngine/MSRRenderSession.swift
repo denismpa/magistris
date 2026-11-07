@@ -557,6 +557,12 @@ open class MSRRenderSession: NSObject, @unchecked Sendable {
         }
     }
 
+    open func insertPercussionNote(pageIndex: Int, normalizedX: Double, normalizedY: Double, midiPitch: Int) throws -> MSREditState {
+        try edit("The MuseScore render core could not place that percussion note there.") {
+            $0.pointee.insertPercussionNote(Int32(pageIndex), normalizedX, normalizedY, Int32(midiPitch), &$1, &$2)
+        }
+    }
+
     open func insertPitchAtCursor(_ pitchClass: Int, preferFlats: Bool, addToCurrentChord: Bool) throws -> MSREditState {
         try edit("The MuseScore render core could not enter that pitch at the current cursor.") {
             $0.pointee.insertPitchAtCursor(Int32(pitchClass), preferFlats, addToCurrentChord, &$1, &$2)
@@ -593,6 +599,18 @@ open class MSRRenderSession: NSObject, @unchecked Sendable {
         guard session.pointee.noteEntryPreview(Int32(pageIndex), normalizedX, normalizedY, Int32(durationCode), rest,
                                                Int32(accidentalKind), &preview, &message) else {
             throw failure(message, "The MuseScore render core could not preview note entry there.")
+        }
+        return makeNoteEntryPreviewInfo(preview)
+    }
+
+    open func percussionNoteEntryPreview(pageIndex: Int, normalizedX: Double, normalizedY: Double, durationCode: Int,
+                                         midiPitch: Int) throws -> MSRNoteEntryPreviewInfo {
+        let session = try requireSession()
+        var preview = msr.render.NoteEntryPreviewState()
+        var message = std.string()
+        guard session.pointee.percussionNoteEntryPreview(Int32(pageIndex), normalizedX, normalizedY, Int32(durationCode),
+                                                        Int32(midiPitch), &preview, &message) else {
+            throw failure(message, "The MuseScore render core could not preview percussion entry there.")
         }
         return makeNoteEntryPreviewInfo(preview)
     }

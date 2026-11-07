@@ -154,7 +154,7 @@ struct UpdateNoticeSheet: View {
             systemImage: ScoreReaderPaletteButton.fingeringSystemImage,
             title: "Finger numbers",
             detail: "Add finger numbers to your score. Choose Text > Fingering and tap 1 to 5. "
-                + "Aria moves to the next note for you and skips rests."
+                + "The editor moves to the next note for you and skips rests."
         )
         let noteEntry = Item(
             systemImage: "music.note.list",
@@ -179,7 +179,7 @@ struct UpdateNoticeSheet: View {
         let engine = Item(
             systemImage: "gearshape",
             title: "MuseScore Studio 4.7.6",
-            detail: "Aria now uses the same engine as MuseScore Studio 4.7.6 on desktop."
+            detail: "The app now uses the same engine as MuseScore Studio 4.7.6 on desktop."
         )
         let tempo = Item(
             systemImage: "metronome",
@@ -199,7 +199,7 @@ struct UpdateNoticeSheet: View {
         let splitView = Item(
             systemImage: "rectangle.split.2x1",
             title: "Split View and Stage Manager",
-            detail: "In a narrow window, Aria switches to its iPhone layout so everything fits.",
+            detail: "In a narrow window, the app switches to its iPhone layout so everything fits.",
             isPadOnly: true
         )
         if DuoPoseMonitor.shared.pose.isDuo {
@@ -271,7 +271,7 @@ struct UpdateNoticeSheet: View {
                 }
                 .padding()
             }
-            .navigationTitle("What's New in Aria")
+            .navigationTitle("What's New in \(LibraryBrand.displayName)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if page < pages.count - 1 {

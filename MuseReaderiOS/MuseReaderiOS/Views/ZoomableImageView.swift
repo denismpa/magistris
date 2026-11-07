@@ -10,6 +10,8 @@ import SwiftUI
 import UIKit
 
 struct ZoomableImageView: UIViewRepresentable {
+    @Environment(\.scoreReaderWriteController) private var writeController
+    @Environment(\.scoreReaderWritePageIndex) private var writePageIndex
     let imageData: Data?
     let pdfData: Data?
     let prefersRasterAtRest: Bool
@@ -44,7 +46,6 @@ struct ZoomableImageView: UIViewRepresentable {
     var onMeasureRangePreview: ((CGPoint, CGPoint) -> Void)? = nil
     var onMeasureRangePreviewEnd: (() -> Void)? = nil
     var onMeasureRangeDrag: ((CGPoint, CGPoint) -> Void)? = nil
-    var onPencilInsertionFineTune: ((CGPoint, CGPoint) -> Void)? = nil
     var onPencilHoverPreview: ((CGPoint?) -> Void)? = nil
     var onPencilInteractionStart: (() -> Void)? = nil
     var onPencilDoubleTap: (() -> Void)? = nil
@@ -77,7 +78,6 @@ struct ZoomableImageView: UIViewRepresentable {
             onMeasureRangePreview: onMeasureRangePreview,
             onMeasureRangePreviewEnd: onMeasureRangePreviewEnd,
             onMeasureRangeDrag: onMeasureRangeDrag,
-            onPencilInsertionFineTune: onPencilInsertionFineTune,
             onPencilHoverPreview: onPencilHoverPreview,
             onPencilInteractionStart: onPencilInteractionStart,
             onPencilDoubleTap: onPencilDoubleTap,
@@ -126,6 +126,9 @@ struct ZoomableImageView: UIViewRepresentable {
         containerView.addSubview(contentView)
         containerView.addSubview(overlayView)
         containerView.addSubview(annotationOverlayView)
+        let writeInkView = ScoreReaderWriteInkView()
+        writeInkView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(writeInkView)
         scrollView.addSubview(containerView)
 
         let pageWidthConstraint = containerView.widthAnchor.constraint(equalToConstant: max(displayedPageSize.width, 1))
@@ -150,11 +153,16 @@ struct ZoomableImageView: UIViewRepresentable {
             annotationOverlayView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
             annotationOverlayView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             annotationOverlayView.topAnchor.constraint(equalTo: containerView.topAnchor),
-            annotationOverlayView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
+            annotationOverlayView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            writeInkView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            writeInkView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            writeInkView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            writeInkView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
         ])
 
         let tapGestureRecognizer = ScorePageTapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         tapGestureRecognizer.onPencilInteractionStart = context.coordinator.onPencilInteractionStart
+        tapGestureRecognizer.requiresExclusiveTouchType = true
         overlayView.addGestureRecognizer(tapGestureRecognizer)
 
         let annotationGestureRecognizer = ScoreAnnotationGestureRecognizer(
@@ -165,6 +173,23 @@ struct ZoomableImageView: UIViewRepresentable {
         annotationGestureRecognizer.cancelsTouchesInView = true
         overlayView.addGestureRecognizer(annotationGestureRecognizer)
         tapGestureRecognizer.require(toFail: annotationGestureRecognizer)
+
+        let writeGestureRecognizer = ScoreReaderWriteGestureRecognizer(
+            target: context.coordinator, action: #selector(Coordinator.handleWriteGesture(_:))
+        )
+        writeGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        writeGestureRecognizer.requiresExclusiveTouchType = false
+        writeGestureRecognizer.cancelsTouchesInView = false
+        writeGestureRecognizer.delegate = context.coordinator
+        writeGestureRecognizer.acceptsStart = { [weak coordinator = context.coordinator] point in
+            guard let coordinator, !coordinator.isUserZooming,
+                  coordinator.zoomScrollView?.isDragging != true,
+                  coordinator.zoomScrollView?.isDecelerating != true,
+                  let overlay = coordinator.overlayView,
+                  let normalizedPoint = overlay.normalizedPoint(at: point) else { return false }
+            return coordinator.writeController?.canBeginStroke(at: normalizedPoint, pageIndex: coordinator.writePageIndex) == true
+        }
+        overlayView.addGestureRecognizer(writeGestureRecognizer)
 
         let doubleTapGestureRecognizer = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleReadingDoubleTap(_:)))
         doubleTapGestureRecognizer.numberOfTapsRequired = 2
@@ -197,9 +222,10 @@ struct ZoomableImageView: UIViewRepresentable {
         let noteDragGestureRecognizer = ScorePageLongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSelectedNoteDrag(_:)))
         noteDragGestureRecognizer.minimumPressDuration = 0.12
         noteDragGestureRecognizer.allowableMovement = 240
+        noteDragGestureRecognizer.requiresExclusiveTouchType = true
         noteDragGestureRecognizer.delegate = context.coordinator
-        noteDragGestureRecognizer.onPencilInteractionStart = context.coordinator.onPencilInteractionStart
         overlayView.addGestureRecognizer(noteDragGestureRecognizer)
+        tapGestureRecognizer.require(toFail: noteDragGestureRecognizer)
 
         let pencilHoverGestureRecognizer = UIHoverGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePencilHover(_:)))
         pencilHoverGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
@@ -215,6 +241,8 @@ struct ZoomableImageView: UIViewRepresentable {
         context.coordinator.contentView = contentView
         context.coordinator.overlayView = overlayView
         context.coordinator.annotationOverlayView = annotationOverlayView
+        context.coordinator.writeInkView = writeInkView
+        context.coordinator.writeGestureRecognizer = writeGestureRecognizer
         context.coordinator.annotationGestureRecognizer = annotationGestureRecognizer
         context.coordinator.tapGestureRecognizer = tapGestureRecognizer
         context.coordinator.noteDragGestureRecognizer = noteDragGestureRecognizer
@@ -230,6 +258,26 @@ struct ZoomableImageView: UIViewRepresentable {
     }
 
     func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        let writingActive = writeController?.isActive == true
+        let isWritePage = writeController?.target?.pageIndex == writePageIndex
+        context.coordinator.writeController = writeController
+        context.coordinator.writePageIndex = writePageIndex
+        context.coordinator.writeGestureRecognizer?.isEnabled = writingActive && isWritePage && writeController?.canCapture == true
+        context.coordinator.writeGestureRecognizer?.maximumPoints = min(2_048, writeController?.remainingPointBudget ?? 0)
+        context.coordinator.writeInkView?.controller = isWritePage ? writeController : nil
+        context.coordinator.writeInkView?.imageSize = contentSize
+        context.coordinator.writeInkView?.isHidden = !writingActive || !isWritePage
+        context.coordinator.writeInkView?.setNeedsDisplay()
+        // Keep all normal Pencil paths out of the Write stroke recognizer.
+        let selectionTouchTypes = writingActive
+            ? [NSNumber(value: UITouch.TouchType.direct.rawValue)] : nil
+        context.coordinator.tapGestureRecognizer?.allowedTouchTypes = selectionTouchTypes ?? [
+            NSNumber(value: UITouch.TouchType.direct.rawValue), NSNumber(value: UITouch.TouchType.pencil.rawValue),
+            NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
+        ]
+        context.coordinator.noteDragGestureRecognizer?.allowedTouchTypes = selectionTouchTypes ?? [
+            NSNumber(value: UITouch.TouchType.direct.rawValue), NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
         context.coordinator.onTap = onTap
         context.coordinator.onSelectedNoteDrag = onSelectedNoteDrag
         context.coordinator.onExpressionEndpointDrag = onExpressionEndpointDrag
@@ -237,11 +285,9 @@ struct ZoomableImageView: UIViewRepresentable {
         context.coordinator.onMeasureRangePreview = onMeasureRangePreview
         context.coordinator.onMeasureRangePreviewEnd = onMeasureRangePreviewEnd
         context.coordinator.onMeasureRangeDrag = onMeasureRangeDrag
-        context.coordinator.onPencilInsertionFineTune = onPencilInsertionFineTune
         context.coordinator.onPencilHoverPreview = onPencilHoverPreview
         context.coordinator.onPencilInteractionStart = onPencilInteractionStart
         context.coordinator.tapGestureRecognizer?.onPencilInteractionStart = onPencilInteractionStart
-        context.coordinator.noteDragGestureRecognizer?.onPencilInteractionStart = onPencilInteractionStart
         context.coordinator.allowsPencilInsertionFineTune = allowsPencilInsertionFineTune
         context.coordinator.onPencilDoubleTap = onPencilDoubleTap
         context.coordinator.onSwipePreviousPage = onSwipePreviousPage
@@ -257,10 +303,10 @@ struct ZoomableImageView: UIViewRepresentable {
         context.coordinator.annotationColor = annotationColor
         context.coordinator.annotationWidth = annotationWidth
         context.coordinator.allowsPlaybackFollow = allowsPlaybackFollow
-        context.coordinator.noteDragGestureRecognizer?.isEnabled = allowsEditingInteractions
-        context.coordinator.pencilHoverGestureRecognizer?.isEnabled = allowsEditingInteractions
-        context.coordinator.pencilInteraction?.isEnabled = allowsEditingInteractions || annotationModeActive
-        context.coordinator.annotationGestureRecognizer?.isEnabled = allowsAnnotationInteraction
+        context.coordinator.noteDragGestureRecognizer?.isEnabled = allowsEditingInteractions && !annotationModeActive && !writingActive
+        context.coordinator.pencilHoverGestureRecognizer?.isEnabled = allowsEditingInteractions && !annotationModeActive && !writingActive
+        context.coordinator.pencilInteraction?.isEnabled = (allowsEditingInteractions || annotationModeActive) && !writingActive
+        context.coordinator.annotationGestureRecognizer?.isEnabled = allowsAnnotationInteraction && !writingActive
         context.coordinator.annotationGestureRecognizer?.allowedTouchTypes = annotationModeActive
             ? [NSNumber(value: UITouch.TouchType.direct.rawValue), NSNumber(value: UITouch.TouchType.pencil.rawValue)]
             : [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
@@ -333,7 +379,6 @@ struct ZoomableImageView: UIViewRepresentable {
         var onMeasureRangePreview: ((CGPoint, CGPoint) -> Void)?
         var onMeasureRangePreviewEnd: (() -> Void)?
         var onMeasureRangeDrag: ((CGPoint, CGPoint) -> Void)?
-        var onPencilInsertionFineTune: ((CGPoint, CGPoint) -> Void)?
         var onPencilHoverPreview: ((CGPoint?) -> Void)?
         var onPencilInteractionStart: (() -> Void)?
         var onPencilDoubleTap: (() -> Void)?
@@ -351,6 +396,10 @@ struct ZoomableImageView: UIViewRepresentable {
         var annotationWidth: Double = 4
         var allowsPlaybackFollow = true
         var allowsPencilInsertionFineTune = false
+        weak var writeController: ScoreReaderWriteController?
+        var writePageIndex = -1
+        weak var writeInkView: ScoreReaderWriteInkView?
+        weak var writeGestureRecognizer: ScoreReaderWriteGestureRecognizer?
         var activeNotationAutoScrollRevision = 0
         var activeNotationTopInset: CGFloat = 0
         var activeNotationBottomInset: CGFloat = 0
@@ -393,11 +442,11 @@ struct ZoomableImageView: UIViewRepresentable {
         private var measureRangeDragStartPoint: CGPoint?
         private var measureRangeDragAnchorFrame: CGRect?
         private var readingLongPressStartPoint: CGPoint?
-        private var insertionDragStartPoint: CGPoint?
+        private var isPencilInsertionActive = false
         private var lastPencilHoverPoint: CGPoint?
         private var annotationMoveStartPoint: CGPoint?
         private var annotationIsMovingSelection = false
-        private let pencilHoverPreviewMovementThreshold: CGFloat = 4
+        private let pencilHoverPreviewMovementThreshold: CGFloat = 1
 
         init(
             zoomScale: Binding<CGFloat>,
@@ -409,7 +458,6 @@ struct ZoomableImageView: UIViewRepresentable {
             onMeasureRangePreview: ((CGPoint, CGPoint) -> Void)? = nil,
             onMeasureRangePreviewEnd: (() -> Void)? = nil,
             onMeasureRangeDrag: ((CGPoint, CGPoint) -> Void)? = nil,
-            onPencilInsertionFineTune: ((CGPoint, CGPoint) -> Void)? = nil,
             onPencilHoverPreview: ((CGPoint?) -> Void)? = nil,
             onPencilInteractionStart: (() -> Void)? = nil,
             onPencilDoubleTap: (() -> Void)? = nil,
@@ -427,7 +475,6 @@ struct ZoomableImageView: UIViewRepresentable {
             self.onMeasureRangePreview = onMeasureRangePreview
             self.onMeasureRangePreviewEnd = onMeasureRangePreviewEnd
             self.onMeasureRangeDrag = onMeasureRangeDrag
-            self.onPencilInsertionFineTune = onPencilInsertionFineTune
             self.onPencilHoverPreview = onPencilHoverPreview
             self.onPencilInteractionStart = onPencilInteractionStart
             self.onPencilDoubleTap = onPencilDoubleTap
@@ -443,9 +490,11 @@ struct ZoomableImageView: UIViewRepresentable {
 
         func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
             isUserZooming = true
+            cancelPencilEntryForNavigation()
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            cancelActiveWriteStroke()
             let allowsInnerPanning = scrollView.zoomScale > 1.01
             scrollView.isScrollEnabled = allowsInnerPanning || usesActiveNotationFocus
             updateActiveNotationContentInsets(in: scrollView)
@@ -462,10 +511,12 @@ struct ZoomableImageView: UIViewRepresentable {
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            cancelActiveWriteStroke()
             publishViewport(from: scrollView)
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            cancelPencilEntryForNavigation()
             onManualScroll?()
         }
 
@@ -729,6 +780,7 @@ struct ZoomableImageView: UIViewRepresentable {
 
         @objc
         func handleTap(_ gestureRecognizer: ScorePageTapGestureRecognizer) {
+            guard writeController?.isActive != true else { return }
             guard
                 let overlayView
             else {
@@ -736,12 +788,14 @@ struct ZoomableImageView: UIViewRepresentable {
             }
 
             let pagePoint = gestureRecognizer.pageLocation(in: overlayView)
-            guard let normalizedPoint = overlayView.normalizedLayoutMarkerTapPoint(at: pagePoint)
-                ?? overlayView.normalizedPoint(at: pagePoint)
-            else {
-                return
-            }
+            let isPencilEntry = gestureRecognizer.inputKind == .pencil && allowsPencilInsertionFineTune
+            let markerPoint = isPencilEntry ? nil : overlayView.normalizedLayoutMarkerTapPoint(at: pagePoint)
+            guard let normalizedPoint = markerPoint ?? overlayView.normalizedPoint(at: pagePoint) else { return }
 
+            if gestureRecognizer.inputKind == .pencil {
+                guard !isUserZooming, zoomScrollView?.isDragging != true else { return }
+                clearPencilHover()
+            }
             onTap?(normalizedPoint, gestureRecognizer.inputKind)
         }
 
@@ -840,32 +894,31 @@ struct ZoomableImageView: UIViewRepresentable {
             switch gestureRecognizer.state {
             case .began:
                 let startPoint = gestureRecognizer.initialPageLocation(in: overlayView)
-                if gestureRecognizer.inputKind == .pencil {
-                    onPencilInteractionStart?()
-                }
                 if allowsPencilInsertionFineTune && gestureRecognizer.inputKind == .pencil {
                     selectedNoteDragStartPoint = nil
                     selectedMovableElementDragStartPoint = nil
                     expressionEndpointDragIsStart = nil
                     measureRangeDragStartPoint = nil
                     measureRangeDragAnchorFrame = nil
-                    insertionDragStartPoint = startPoint
-                    overlayView.updateInsertionFineTune(at: point)
-                    onPencilHoverPreview?(overlayView.normalizedPoint(at: point))
+                    isPencilInsertionActive = overlayView.normalizedPoint(at: startPoint) != nil
+                    if isPencilInsertionActive {
+                        overlayView.updateInsertionFineTune(at: point)
+                        onPencilHoverPreview?(overlayView.normalizedPoint(at: point))
+                    }
                 } else if allowsPencilInsertionFineTune {
                     selectedNoteDragStartPoint = nil
                     selectedMovableElementDragStartPoint = nil
                     expressionEndpointDragIsStart = nil
                     measureRangeDragStartPoint = startPoint
                     measureRangeDragAnchorFrame = overlayView.measureRangeDragAnchorFrame(at: startPoint)
-                    insertionDragStartPoint = nil
+                    isPencilInsertionActive = false
                 } else if overlayView.containsSelectedNote(at: startPoint) {
                     selectedNoteDragStartPoint = startPoint
                     selectedMovableElementDragStartPoint = nil
                     expressionEndpointDragIsStart = nil
                     measureRangeDragStartPoint = nil
                     measureRangeDragAnchorFrame = nil
-                    insertionDragStartPoint = nil
+                    isPencilInsertionActive = false
                     overlayView.updateSelectedNoteDrag(startPoint: startPoint, currentPoint: point)
                 } else if overlayView.containsSelectedMovableElement(at: startPoint) {
                     selectedNoteDragStartPoint = nil
@@ -873,7 +926,7 @@ struct ZoomableImageView: UIViewRepresentable {
                     expressionEndpointDragIsStart = nil
                     measureRangeDragStartPoint = nil
                     measureRangeDragAnchorFrame = nil
-                    insertionDragStartPoint = nil
+                    isPencilInsertionActive = false
                     overlayView.updateSelectedMovableElementDrag(startPoint: startPoint, currentPoint: point)
                 } else if let endpointIsStart = overlayView.expressionEndpoint(at: startPoint) {
                     selectedNoteDragStartPoint = nil
@@ -881,7 +934,7 @@ struct ZoomableImageView: UIViewRepresentable {
                     expressionEndpointDragIsStart = endpointIsStart
                     measureRangeDragStartPoint = nil
                     measureRangeDragAnchorFrame = nil
-                    insertionDragStartPoint = nil
+                    isPencilInsertionActive = false
                     overlayView.updateExpressionEndpointDragPreview(start: endpointIsStart, at: point)
                 } else {
                     selectedNoteDragStartPoint = nil
@@ -889,7 +942,7 @@ struct ZoomableImageView: UIViewRepresentable {
                     expressionEndpointDragIsStart = nil
                     measureRangeDragStartPoint = startPoint
                     measureRangeDragAnchorFrame = overlayView.measureRangeDragAnchorFrame(at: startPoint)
-                    insertionDragStartPoint = nil
+                    isPencilInsertionActive = false
                 }
 
             case .changed:
@@ -899,7 +952,7 @@ struct ZoomableImageView: UIViewRepresentable {
                     overlayView.updateSelectedMovableElementDrag(startPoint: selectedMovableElementDragStartPoint, currentPoint: point)
                 } else if let expressionEndpointDragIsStart {
                     overlayView.updateExpressionEndpointDragPreview(start: expressionEndpointDragIsStart, at: point)
-                } else if insertionDragStartPoint != nil {
+                } else if isPencilInsertionActive {
                     overlayView.updateInsertionFineTune(at: point)
                     onPencilHoverPreview?(overlayView.normalizedPoint(at: point))
                 } else if let measureRangeDragStartPoint,
@@ -935,14 +988,13 @@ struct ZoomableImageView: UIViewRepresentable {
                     if let dropPoint {
                         onExpressionEndpointDrag?(expressionEndpointDragIsStart, dropPoint)
                     }
-                } else if let insertionDragStartPoint {
-                    self.insertionDragStartPoint = nil
-                    let startPoint = overlayView.insertionFineTuneDropPoint(at: insertionDragStartPoint)
-                    let dropPoint = overlayView.insertionFineTuneDropPoint(at: point)
+                } else if isPencilInsertionActive {
+                    isPencilInsertionActive = false
                     overlayView.clearInsertionFineTune()
-                    onPencilHoverPreview?(nil)
-                    if let startPoint, let dropPoint {
-                        onPencilInsertionFineTune?(startPoint, dropPoint)
+                    clearPencilHover()
+                    if allowsPencilInsertionFineTune, !isUserZooming, zoomScrollView?.isDragging != true,
+                       let dropPoint = overlayView.normalizedPoint(at: point) {
+                        onTap?(dropPoint, .pencil)
                     }
                 } else if let measureRangeDragStartPoint {
                     self.measureRangeDragStartPoint = nil
@@ -967,15 +1019,14 @@ struct ZoomableImageView: UIViewRepresentable {
                 expressionEndpointDragIsStart = nil
                 measureRangeDragStartPoint = nil
                 measureRangeDragAnchorFrame = nil
-                insertionDragStartPoint = nil
-                lastPencilHoverPoint = nil
+                isPencilInsertionActive = false
                 overlayView.clearSelectedNoteDrag()
                 overlayView.clearSelectedMovableElementDrag()
                 overlayView.clearExpressionEndpointDragPreview()
                 overlayView.clearInsertionFineTune()
                 overlayView.clearMeasureRangeDragPreview()
                 onMeasureRangePreviewEnd?()
-                onPencilHoverPreview?(nil)
+                if gestureRecognizer.inputKind == .pencil { clearPencilHover() }
 
             default:
                 break
@@ -988,24 +1039,86 @@ struct ZoomableImageView: UIViewRepresentable {
                 return
             }
 
-            let point = gestureRecognizer.location(in: overlayView)
             switch gestureRecognizer.state {
             case .began, .changed:
-                onPencilInteractionStart?()
-                if let lastPencilHoverPoint,
-                   hypot(point.x - lastPencilHoverPoint.x, point.y - lastPencilHoverPoint.y) < pencilHoverPreviewMovementThreshold {
+                guard !isPencilInsertionActive, !isUserZooming, zoomScrollView?.isDragging != true else { return }
+                let point = gestureRecognizer.location(in: overlayView)
+                guard let normalizedPoint = overlayView.normalizedPoint(at: point) else {
+                    clearPencilHover()
                     return
                 }
-                lastPencilHoverPoint = point
+                let windowPoint = gestureRecognizer.location(in: nil)
+                if let lastPencilHoverPoint,
+                   hypot(windowPoint.x - lastPencilHoverPoint.x, windowPoint.y - lastPencilHoverPoint.y) < pencilHoverPreviewMovementThreshold {
+                    return
+                }
+                onPencilInteractionStart?()
+                lastPencilHoverPoint = windowPoint
                 overlayView.updatePencilHoverPreview(at: point)
-                onPencilHoverPreview?(overlayView.normalizedPoint(at: point))
+                onPencilHoverPreview?(normalizedPoint)
             case .ended, .cancelled, .failed:
-                lastPencilHoverPoint = nil
-                overlayView.clearPencilHoverPreview()
-                onPencilHoverPreview?(nil)
+                if !isPencilInsertionActive { clearPencilHover() }
             default:
                 break
             }
+        }
+
+        private func clearPencilHover() {
+            lastPencilHoverPoint = nil
+            overlayView?.clearPencilHoverPreview()
+            onPencilHoverPreview?(nil)
+        }
+
+        private func cancelPencilEntryForNavigation() {
+            cancelActiveWriteStroke()
+            if let tapGestureRecognizer, tapGestureRecognizer.isEnabled,
+               tapGestureRecognizer.inputKind == .pencil {
+                tapGestureRecognizer.isEnabled = false
+                tapGestureRecognizer.isEnabled = true
+            }
+            if let noteDragGestureRecognizer, noteDragGestureRecognizer.isEnabled,
+               noteDragGestureRecognizer.inputKind == .pencil {
+                noteDragGestureRecognizer.isEnabled = false
+                noteDragGestureRecognizer.isEnabled = true
+            }
+            clearPencilHover()
+        }
+
+        private func cancelActiveWriteStroke() {
+            guard let writeGestureRecognizer,
+                  writeGestureRecognizer.state == .began || writeGestureRecognizer.state == .changed else { return }
+            writeGestureRecognizer.isEnabled = false
+            writeController?.cancelActiveStroke()
+            writeGestureRecognizer.isEnabled = writeController?.canCapture == true
+            writeInkView?.setNeedsDisplay()
+        }
+
+        @objc
+        func handleWriteGesture(_ recognizer: ScoreReaderWriteGestureRecognizer) {
+            guard let overlayView, let writeController, writeController.target?.pageIndex == writePageIndex else { return }
+            // Preserve samples outside the bar so the recognizer can flag the
+            // stroke, instead of turning a clipped shape into another symbol.
+            let imageRect = AVMakeRect(aspectRatio: overlayView.imageSize, insideRect: overlayView.bounds)
+            guard imageRect.width > 0, imageRect.height > 0 else { return }
+            let points = recognizer.samples.map { sample in
+                MusicInkPoint(x: Double((sample.point.x - imageRect.minX) / imageRect.width),
+                              y: Double((sample.point.y - imageRect.minY) / imageRect.height), time: sample.time)
+            }
+            switch recognizer.state {
+            case .began, .changed:
+                writeController.updateStroke(points)
+            case .ended:
+                writeController.finishStroke(points)
+            case .failed, .cancelled:
+                if recognizer.exceededPointLimit {
+                    writeController.rejectStroke("That stroke is too long. Draw a smaller symbol. Earlier ink is kept.")
+                } else {
+                    writeController.cancelActiveStroke()
+                }
+            default:
+                break
+            }
+            writeInkView?.setNeedsDisplay()
         }
 
         @objc
@@ -1106,14 +1219,17 @@ struct ZoomableImageView: UIViewRepresentable {
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard gestureRecognizer === annotationGestureRecognizer || otherGestureRecognizer === annotationGestureRecognizer else {
+            let usesWrite = gestureRecognizer === writeGestureRecognizer || otherGestureRecognizer === writeGestureRecognizer
+            guard usesWrite || gestureRecognizer === annotationGestureRecognizer || otherGestureRecognizer === annotationGestureRecognizer else {
                 return false
             }
-            let companion = gestureRecognizer === annotationGestureRecognizer ? otherGestureRecognizer : gestureRecognizer
+            let primary: UIGestureRecognizer? = usesWrite ? writeGestureRecognizer : annotationGestureRecognizer
+            let companion = gestureRecognizer === primary ? otherGestureRecognizer : gestureRecognizer
             return companion === zoomScrollView?.panGestureRecognizer || companion === zoomScrollView?.pinchGestureRecognizer
         }
 
         func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+            guard UIPencilInteraction.preferredTapAction != .ignore else { return }
             onPencilDoubleTap?()
         }
     }
@@ -1471,21 +1587,28 @@ final class ScorePageZoomScrollView: UIScrollView {
     }
 }
 
+/// Screen-space slop keeps the distinction between a tap or hold and a stroke
+/// the same at every zoom level.
+enum ScorePencilGestureMovement {
+    static func exceedsTapSlop(from start: CGPoint, to sample: CGPoint) -> Bool {
+        hypot(sample.x - start.x, sample.y - start.y) > 5
+    }
+
+    static func exceedsTapSlop(from start: CGPoint, touch: UITouch, event: UIEvent) -> Bool {
+        let samples = event.coalescedTouches(for: touch) ?? [touch]
+        return samples.contains { exceedsTapSlop(from: start, to: $0.preciseLocation(in: nil)) }
+    }
+}
+
 final class ScorePageTapGestureRecognizer: UITapGestureRecognizer {
     var onPencilInteractionStart: (() -> Void)?
-    private weak var preciseLocationView: UIView?
-    private var precisePencilLocation: CGPoint?
     private(set) var inputKind: ScorePageTapInputKind = .direct
-
-    // Tighter slop for the Pencil so a slide during the tap fails (no stray note)
-    // rather than placing one at the drifted spot. UITapGestureRecognizer has no
-    // public allowableMovement, so enforce it manually for Pencil touches only;
-    // finger taps keep the system's default slop.
-    private let pencilAllowableMovement: CGFloat = 5
-    private var trackedPencilStart: CGPoint?
+    private weak var trackedPencil: UITouch?
+    private var pencilStart: CGPoint?
+    private var precisePencilLocation: CGPoint?
 
     func pageLocation(in view: UIView) -> CGPoint {
-        if preciseLocationView === view, let precisePencilLocation {
+        if self.view === view, let precisePencilLocation {
             return precisePencilLocation
         }
 
@@ -1494,59 +1617,53 @@ final class ScorePageTapGestureRecognizer: UITapGestureRecognizer {
 
     override func reset() {
         super.reset()
-        preciseLocationView = nil
-        precisePencilLocation = nil
         inputKind = .direct
-        trackedPencilStart = nil
+        trackedPencil = nil
+        pencilStart = nil
+        precisePencilLocation = nil
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let pencilTouch = touches.first(where: { $0.type == .pencil }), let view {
-            trackedPencilStart = pencilTouch.preciseLocation(in: view)
+        if let pencil = touches.first(where: { $0.type == .pencil }), trackedPencil == nil {
+            inputKind = .pencil
+            trackedPencil = pencil
+            pencilStart = pencil.preciseLocation(in: nil)
+            // Keep the landing point for a tap. A valid tap may still drift
+            // far enough at lift to cross a staff space.
+            if let view { precisePencilLocation = pencil.preciseLocation(in: view) }
             onPencilInteractionStart?()
         }
         super.touchesBegan(touches, with: event)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
-        super.touchesMoved(touches, with: event)
-
-        guard
-            state == .possible,
-            let start = trackedPencilStart,
-            let view,
-            let pencilTouch = touches.first(where: { $0.type == .pencil })
-        else {
+        if state == .possible, let pencil = trackedPencil, touches.contains(pencil), let start = pencilStart,
+           ScorePencilGestureMovement.exceedsTapSlop(from: start, touch: pencil, event: event) {
+            state = .failed
             return
         }
-
-        let current = pencilTouch.preciseLocation(in: view)
-        if hypot(current.x - start.x, current.y - start.y) > pencilAllowableMovement {
-            state = .failed
-        }
+        super.touchesMoved(touches, with: event)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let pencilTouch = touches.first(where: { $0.type == .pencil }), let view {
-            preciseLocationView = view
-            precisePencilLocation = pencilTouch.preciseLocation(in: view)
-            inputKind = .pencil
+        if state == .possible, let pencil = trackedPencil, touches.contains(pencil), let start = pencilStart,
+           ScorePencilGestureMovement.exceedsTapSlop(from: start, touch: pencil, event: event) {
+            state = .failed
+            return
         }
-
         super.touchesEnded(touches, with: event)
     }
 }
 
 final class ScorePageLongPressGestureRecognizer: UILongPressGestureRecognizer {
-    var onPencilInteractionStart: (() -> Void)?
     private(set) var inputKind: ScorePageTapInputKind = .direct
-    private weak var preciseLocationView: UIView?
+    private weak var trackedPencil: UITouch?
+    private var pencilStart: CGPoint?
     private var precisePencilLocation: CGPoint?
-    private weak var initialLocationView: UIView?
     private var initialLocation: CGPoint?
 
     func pageLocation(in view: UIView) -> CGPoint {
-        if preciseLocationView === view, let precisePencilLocation {
+        if self.view === view, let precisePencilLocation {
             return precisePencilLocation
         }
 
@@ -1554,7 +1671,7 @@ final class ScorePageLongPressGestureRecognizer: UILongPressGestureRecognizer {
     }
 
     func initialPageLocation(in view: UIView) -> CGPoint {
-        if initialLocationView === view, let initialLocation {
+        if self.view === view, let initialLocation {
             return initialLocation
         }
 
@@ -1564,36 +1681,45 @@ final class ScorePageLongPressGestureRecognizer: UILongPressGestureRecognizer {
     override func reset() {
         super.reset()
         inputKind = .direct
-        preciseLocationView = nil
+        trackedPencil = nil
+        pencilStart = nil
         precisePencilLocation = nil
-        initialLocationView = nil
         initialLocation = nil
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let pencilTouch = touches.first(where: { $0.type == .pencil }), let view {
-            inputKind = .pencil
-            preciseLocationView = view
-            precisePencilLocation = pencilTouch.preciseLocation(in: view)
-            initialLocationView = view
-            initialLocation = precisePencilLocation
-            onPencilInteractionStart?()
-        } else if let touch = touches.first, let view {
-            initialLocationView = view
-            initialLocation = touch.location(in: view)
+        if initialLocation == nil, let view {
+            if let pencil = touches.first(where: { $0.type == .pencil }) {
+                inputKind = .pencil
+                trackedPencil = pencil
+                pencilStart = pencil.preciseLocation(in: nil)
+                precisePencilLocation = pencil.preciseLocation(in: view)
+                initialLocation = precisePencilLocation
+            } else {
+                initialLocation = touches.first?.location(in: view)
+            }
         }
 
         super.touchesBegan(touches, with: event)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let pencilTouch = touches.first(where: { $0.type == .pencil }), let view {
-            inputKind = .pencil
-            preciseLocationView = view
-            precisePencilLocation = pencilTouch.preciseLocation(in: view)
+        if let pencil = trackedPencil, touches.contains(pencil) {
+            if state == .possible, let start = pencilStart,
+               ScorePencilGestureMovement.exceedsTapSlop(from: start, touch: pencil, event: event) {
+                state = .failed
+                return
+            }
+            if let view { precisePencilLocation = pencil.preciseLocation(in: view) }
         }
-
         super.touchesMoved(touches, with: event)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let pencil = trackedPencil, touches.contains(pencil), let view {
+            precisePencilLocation = pencil.preciseLocation(in: view)
+        }
+        super.touchesEnded(touches, with: event)
     }
 }
 
@@ -2060,21 +2186,12 @@ final class ScorePageOverlayView: UIView {
         updateOverlayFrames()
     }
 
-    func insertionFineTuneDropPoint(at point: CGPoint) -> CGPoint? {
-        normalizedPoint(at: point)
-    }
-
     func clearInsertionFineTune() {
         insertionFineTunePoint = nil
         updateOverlayFrames()
     }
 
     func updatePencilHoverPreview(at point: CGPoint) {
-        guard allowsPencilHoverPreview else {
-            clearPencilHoverPreview()
-            return
-        }
-
         pencilHoverPreviewPoint = point
         updateOverlayFrames()
     }
@@ -2217,7 +2334,7 @@ final class ScorePageOverlayView: UIView {
         updateChordAttachmentGuide(in: imageRect)
         updateExpressionEndpointFrames(in: imageRect)
 
-        if let previewPoint = insertionFineTunePoint ?? pencilHoverPreviewPoint {
+        if let previewPoint = insertionFineTunePoint ?? (allowsPencilHoverPreview ? pencilHoverPreviewPoint : nil) {
             updateNoteEntryPreview(at: previewPoint)
         } else {
             notePreviewImageView.isHidden = true

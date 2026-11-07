@@ -1268,12 +1268,22 @@ struct LibrarySidebar: View {
     }
 }
 
+enum LibraryBrand {
+    static let displayName: String = {
+        #if os(Android)
+        return "Aria"
+        #else
+        return Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Aria"
+        #endif
+    }()
+}
+
 struct LibraryBrandHeader: View {
     var body: some View {
         HStack(spacing: 14) {
             AriaLogoMark(size: 36, cornerRadius: 11)
 
-            Text("Aria")
+            Text(verbatim: LibraryBrand.displayName)
                 .font(.system(size: 23, weight: .bold))
                 .foregroundStyle(LibraryPalette.ink)
         }
@@ -1482,7 +1492,7 @@ struct PhoneLibraryView: View {
                 HStack(alignment: .center, spacing: 0) {
                     AriaLogoMark(size: 28, cornerRadius: 8)
 
-                    Text("Aria")
+                    Text(verbatim: LibraryBrand.displayName)
                         .font(.system(size: 20, weight: .bold))
                         .foregroundStyle(LibraryPalette.ink)
                         .padding(.leading, 8)
@@ -3236,7 +3246,7 @@ struct ScoreCardInfoPopover: View {
 
                 ScoreInfoRow(label: "Format", value: score.format.displayName)
                 ScoreInfoRow(label: "Imported", value: score.importedAt.formatted(date: .abbreviated, time: .omitted))
-                ScoreInfoRow(label: "Storage", value: score.isStoredInLibrary ? "Aria Library" : "External File")
+                ScoreInfoRow(label: "Storage", value: score.isStoredInLibrary ? "\(LibraryBrand.displayName) Library" : "External File")
 
                 if let version = score.museScoreVersion?.trimmedToNil {
                     ScoreInfoRow(label: "MuseScore", value: version)
@@ -3294,7 +3304,7 @@ struct LibraryScoreInfoEditorSheet: View {
                 }
 
                 Section {
-                    Text("Changes save back to this score in your Aria library.")
+                    Text("Changes save back to this score in your library.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

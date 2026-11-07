@@ -479,6 +479,22 @@ open class MSRPickupMeasureInfo: NSObject, @unchecked Sendable {
     }
 }
 
+open class MSRPercussionInstrumentInfo: NSObject, @unchecked Sendable {
+    public let midiPitch: Int
+    public let name: String
+    public let staffLine: Int
+    public let voice: Int
+    public let notehead: Int
+
+    public init(midiPitch: Int, name: String, staffLine: Int, voice: Int, notehead: Int) {
+        self.midiPitch = midiPitch
+        self.name = name
+        self.staffLine = staffLine
+        self.voice = voice
+        self.notehead = notehead
+    }
+}
+
 open class MSREditState: NSObject, @unchecked Sendable {
     public let selection: MSRSelectionInfo?
     public let noteInputEnabled: Bool
@@ -490,6 +506,7 @@ open class MSREditState: NSObject, @unchecked Sendable {
     public let canUndo: Bool
     public let canRedo: Bool
     public let activeStaffIsPercussion: Bool
+    public let percussionInstruments: [MSRPercussionInstrumentInfo]
     public let createMultiMeasureRests: Bool
     public let hideEmptyStaves: Bool
     public let pageWidthMillimeters: Double
@@ -499,7 +516,7 @@ open class MSREditState: NSObject, @unchecked Sendable {
     public let staffSpacingSpatium: Double
     public let systemSpacingSpatium: Double
 
-    public init(selection: MSRSelectionInfo?, noteInputEnabled: Bool, noteInputInsertsRests: Bool, noteInputIsDotted: Bool, durationCode: Int, currentVoice: Int, canUndo: Bool, canRedo: Bool, activeStaffIsPercussion: Bool, createMultiMeasureRests: Bool, hideEmptyStaves: Bool, pageWidthMillimeters: Double, pageHeightMillimeters: Double, pageMarginMillimeters: Double, staffSizeMillimeters: Double, staffSpacingSpatium: Double, systemSpacingSpatium: Double) {
+    public init(selection: MSRSelectionInfo?, noteInputEnabled: Bool, noteInputInsertsRests: Bool, noteInputIsDotted: Bool, durationCode: Int, currentVoice: Int, canUndo: Bool, canRedo: Bool, activeStaffIsPercussion: Bool, percussionInstruments: [MSRPercussionInstrumentInfo], createMultiMeasureRests: Bool, hideEmptyStaves: Bool, pageWidthMillimeters: Double, pageHeightMillimeters: Double, pageMarginMillimeters: Double, staffSizeMillimeters: Double, staffSpacingSpatium: Double, systemSpacingSpatium: Double) {
         self.selection = selection
         self.noteInputEnabled = noteInputEnabled
         self.noteInputInsertsRests = noteInputInsertsRests
@@ -509,6 +526,7 @@ open class MSREditState: NSObject, @unchecked Sendable {
         self.canUndo = canUndo
         self.canRedo = canRedo
         self.activeStaffIsPercussion = activeStaffIsPercussion
+        self.percussionInstruments = percussionInstruments
         self.createMultiMeasureRests = createMultiMeasureRests
         self.hideEmptyStaves = hideEmptyStaves
         self.pageWidthMillimeters = pageWidthMillimeters

@@ -198,6 +198,44 @@ struct NoteEntryPreviewState {
     std::vector<std::uint8_t> overlayPngData;
 };
 
+//! Positions are relative to one page. staffLine 0 is the top staff line and
+//! positive values move down by half a staff space. Offsets use 480 ticks/quarter.
+struct HandwritingEvent {
+    int offsetTicks = -1; // -1 continues immediately after the previous event.
+    int durationCode = 4;
+    int dots = 0;
+    int staffLine = 4;
+    int accidentalKind = -1; // -1 follows the key, 0 natural, 1 sharp, 2 flat.
+    bool rest = false;
+};
+
+struct HandwritingContext {
+    std::string token;
+    int pageIndex = -1;
+    int measureIndex = -1;
+    int staffIndex = -1;
+    int voice = 0;
+    int64_t measureStartTick = 0;
+    int durationTicks = 0;
+    int timeSignatureNumerator = 4;
+    int timeSignatureDenominator = 4;
+    std::string clef;
+    int key = 0;
+    NormalizedSelectionRect measureRect;
+    double staffTopNormalizedY = 0.0;
+    double staffHalfStepNormalizedY = 0.0;
+    double inputStartNormalizedX = 0.0;
+    double inputEndNormalizedX = 0.0;
+};
+
+struct PercussionInstrument {
+    int midiPitch = -1;
+    std::string name;
+    int staffLine = 0;
+    int voice = 0;
+    int notehead = 0;
+};
+
 struct ScoreEditState {
     ScoreSelectionState selection;
     bool noteInputEnabled = false;
@@ -209,6 +247,7 @@ struct ScoreEditState {
     bool canUndo = false;
     bool canRedo = false;
     bool activeStaffIsPercussion = false;
+    std::vector<PercussionInstrument> percussionInstruments;
     bool createMultiMeasureRests = false;
     bool hideEmptyStaves = false;
     double pageWidthMillimeters = 210.0;
@@ -448,9 +487,14 @@ public:
                   const std::string& text = {});
     bool updateTimeSignature(int numerator, int denominator, bool commonTime, bool cutTime, bool fromStart, ScoreEditState& output, std::string& errorMessage);
     bool updateKeySignature(int keyValue, bool fromStart, ScoreEditState& output, std::string& errorMessage);
+    bool handwritingContext(int voice, HandwritingContext& output, std::string& errorMessage);
+    bool previewHandwriting(const std::string& contextToken, const std::vector<HandwritingEvent>& events, RenderedPage& output, std::string& errorMessage);
+    bool applyHandwriting(const std::string& contextToken, const std::vector<HandwritingEvent>& events, ScoreEditState& output, std::string& errorMessage);
     bool insertNote(int pageIndex, double normalizedX, double normalizedY, ScoreEditState& output, std::string& errorMessage);
     bool insertNoteWithAccidental(int pageIndex, double normalizedX, double normalizedY, int accidentalKind, ScoreEditState& output, std::string& errorMessage);
     bool insertNoteWithPitch(int pageIndex, double normalizedX, double normalizedY, int pitchClass, bool preferFlats, ScoreEditState& output, std::string& errorMessage);
+    bool insertPercussionNote(int pageIndex, double normalizedX, double normalizedY, int midiPitch, ScoreEditState& output, std::string& errorMessage);
+    bool percussionNoteEntryPreview(int pageIndex, double normalizedX, double normalizedY, int durationCode, int midiPitch, NoteEntryPreviewState& output, std::string& errorMessage);
     bool noteEntryPreview(int pageIndex, double normalizedX, double normalizedY, int durationCode, bool rest, int accidentalKind, NoteEntryPreviewState& output, std::string& errorMessage);
     bool insertPitchAtCursor(int pitchClass, bool preferFlats, bool addToCurrentChord, ScoreEditState& output, std::string& errorMessage);
     bool insertMIDIPitchAtCursor(int midiPitch, bool preferFlats, bool addToCurrentChord, ScoreEditState& output, std::string& errorMessage);

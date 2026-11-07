@@ -209,6 +209,16 @@ func makePickupMeasureInfo(_ pickup: msr.render.PickupMeasureState) -> MSRPickup
 }
 
 func makeEditState(_ state: msr.render.ScoreEditState) -> MSREditState {
+    var percussionInstruments: [MSRPercussionInstrumentInfo] = []
+    for instrument in state.percussionInstruments {
+        percussionInstruments.append(MSRPercussionInstrumentInfo(
+            midiPitch: Int(instrument.midiPitch),
+            name: makeString(instrument.name),
+            staffLine: Int(instrument.staffLine),
+            voice: Int(instrument.voice),
+            notehead: Int(instrument.notehead)
+        ))
+    }
     let editState = MSREditState(selection: makeSelectionInfo(state.selection),
                  noteInputEnabled: state.noteInputEnabled,
                  noteInputInsertsRests: state.noteInputInsertsRests,
@@ -218,6 +228,7 @@ func makeEditState(_ state: msr.render.ScoreEditState) -> MSREditState {
                  canUndo: state.canUndo,
                  canRedo: state.canRedo,
                  activeStaffIsPercussion: state.activeStaffIsPercussion,
+                 percussionInstruments: percussionInstruments,
                  createMultiMeasureRests: state.createMultiMeasureRests,
                  hideEmptyStaves: state.hideEmptyStaves,
                  pageWidthMillimeters: state.pageWidthMillimeters,

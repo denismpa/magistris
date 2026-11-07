@@ -157,7 +157,7 @@
         }
 
         if (!inputState.isValid()) {
-            errorMessage = "Tap a standard staff position before entering a rest.";
+            errorMessage = "Select a staff position before entering a rest.";
             return false;
         }
 
@@ -168,8 +168,11 @@
         }
 
         mu::engraving::Staff* staff = inputState.staff();
+        if (drumsetForStaff(staff, inputState.tick())) {
+            return insertPercussionRest(score, inputState.segment(), inputState.staffIdx(), inputState.voice(), output, errorMessage);
+        }
         if (!isStandardStaff(staff, inputState.tick())) {
-            errorMessage = "Rest entry currently works only on standard staves.";
+            errorMessage = "Rest entry is unavailable on this staff.";
             return false;
         }
 
@@ -2459,6 +2462,17 @@
         return insertNoteWithPitch(pageIndex, normalizedX, normalizedY, std::optional<int>(pitchClass), preferFlats, std::nullopt, output, errorMessage);
     }
 
+    bool insertPercussionNote(const int pageIndex,
+                              const double normalizedX,
+                              const double normalizedY,
+                              const int midiPitch,
+                              msr::render::ScoreEditState& output,
+                              std::string& errorMessage)
+    {
+        return insertNoteWithPitch(pageIndex, normalizedX, normalizedY, std::nullopt, false, std::nullopt,
+                                   output, errorMessage, midiPitch);
+    }
+
     bool noteEntryPreview(const int pageIndex,
                           const double normalizedX,
                           const double normalizedY,
@@ -2466,7 +2480,8 @@
                           const bool rest,
                           const int accidentalKind,
                           msr::render::NoteEntryPreviewState& output,
-                          std::string& errorMessage)
+                          std::string& errorMessage,
+                          const std::optional<int> percussionPitch = std::nullopt)
     {
         if (!supportsEditing()) {
             errorMessage = "Editing is unavailable for this score session.";
@@ -2491,18 +2506,38 @@
             return false;
         }
 
+        output = {};
+        if (!std::isfinite(normalizedX) || !std::isfinite(normalizedY)) {
+            return true;
+        }
         mu::engraving::PointF pagePoint = pointForNormalizedPagePosition(page, normalizedX, normalizedY);
         mu::engraving::Position position;
-        if (!getPagePosition(score, page, &position, pagePoint, inputState.voice())) {
+        if (!getPagePosition(score, page, &position, pagePoint, inputState.voice()) || !position.segment) {
             return true;
         }
 
         mu::engraving::Staff* staff = score->staff(position.staffIdx);
-        if (!staff || !isStandardStaff(staff, position.segment ? position.segment->tick() : mu::engraving::Fraction(0, 1))) {
-            return true;
+        const mu::engraving::Drumset* drumset = nullptr;
+        int drumPitch = -1;
+        mu::engraving::voice_idx_t voice = inputState.voice();
+        if (drumsetForStaff(staff, position.segment->tick())) {
+            drumset = resolvePercussionPoint(staff, pagePoint, position, percussionPitch, rest, drumPitch);
+            if (!drumset) {
+                return true;
+            }
+            if (!rest) {
+                voice = static_cast<mu::engraving::voice_idx_t>(drumset->voice(drumPitch));
+            }
+            if (!percussionTrackIsEditable(score, position.staffIdx * mu::engraving::VOICES + voice, !rest)) {
+                return true;
+            }
+        } else {
+            if (percussionPitch || !isStandardStaff(staff, position.segment->tick())) {
+                return true;
+            }
+            normalizePointInputPositionForPutNote(staff, position);
+            biasDuplicatePointInputAwayFromExistingChord(score, page, staff, pagePoint, position);
         }
-        normalizePointInputPositionForPutNote(staff, position);
-        biasDuplicatePointInputAwayFromExistingChord(score, page, staff, pagePoint, position);
 
         mu::engraving::Segment* segment = position.segment;
         double segmentSkylineTopY = 0.0;
@@ -2519,16 +2554,19 @@
         }
 
         mu::engraving::TDuration duration(durationType);
-        const mu::engraving::Fraction tick = segment->tick();
+        if (inputState.duration().type() == durationType) {
+            duration.setDots(inputState.duration().dots());
+        }
+        const mu::engraving::Fraction tick = position.segment->tick();
         const double mag = staff->staffMag(tick);
         mu::engraving::ShadowNote shadowNote(score);
         shadowNote.setVisible(true);
         shadowNote.mutldata()->setMag(mag);
         shadowNote.setTick(tick);
         shadowNote.setStaffIdx(position.staffIdx);
-        shadowNote.setVoice(inputState.voice());
+        shadowNote.setVoice(voice);
         shadowNote.setLineIndex(position.line);
-        shadowNote.setColor(voiceSelectionColor(static_cast<int>(inputState.voice())));
+        shadowNote.setColor(voiceSelectionColor(static_cast<int>(voice)));
 
         mu::engraving::SymId symNotehead = mu::engraving::SymId::noSym;
         if (rest) {
@@ -2538,8 +2576,12 @@
             shadowNote.setState(symNotehead, duration, true, segmentSkylineTopY, segmentSkylineBottomY);
             delete previewRest;
         } else {
-            symNotehead = mu::engraving::Note::noteHead(0, mu::engraving::NoteHeadGroup::HEAD_NORMAL, duration.headType());
-            const std::optional<mu::engraving::AccidentalType> accidentalType = accidentalKind >= 0
+            const mu::engraving::NoteHeadGroup notehead = drumset
+                ? drumset->noteHead(drumPitch) : mu::engraving::NoteHeadGroup::HEAD_NORMAL;
+            symNotehead = notehead == mu::engraving::NoteHeadGroup::HEAD_CUSTOM
+                ? drumset->noteHeads(drumPitch, duration.headType())
+                : mu::engraving::Note::noteHead(0, notehead, duration.headType());
+            const std::optional<mu::engraving::AccidentalType> accidentalType = !drumset && accidentalKind >= 0
                 ? accidentalTypeForKind(accidentalKind)
                 : std::optional<mu::engraving::AccidentalType>(mu::engraving::AccidentalType::NONE);
             shadowNote.setState(
@@ -2562,7 +2604,7 @@
             }
         }
 
-        const double relX = position.pos.x() - segment->measure()->pageBoundingRect().left();
+        const double relX = position.pos.x() - position.segment->measure()->pageBoundingRect().left();
         position.pos.rx() -= std::min(relX - score->style().styleMM(mu::engraving::Sid::barNoteDistance), 0.0);
 
         score->renderer()->layoutItem(&shadowNote);
@@ -2641,8 +2683,22 @@
         }
 
         mu::engraving::Staff* staff = inputState.staff();
+        if (drumsetForStaff(staff, inputState.tick())) {
+            if (!applyExactPitch) {
+                errorMessage = "Use a mapped percussion pitch on this staff.";
+                return false;
+            }
+            mu::engraving::Segment* segment = inputState.segment();
+            if (addToCurrentChord) {
+                if (mu::engraving::Note* note = currentSelectedNote(score); note && note->staff() == staff) {
+                    segment = note->chord()->segment();
+                }
+            }
+            return insertMappedPercussionNote(score, segment, inputState.staffIdx(), midiPitch,
+                                              addToCurrentChord, !addToCurrentChord, output, errorMessage);
+        }
         if (!isStandardStaff(staff, inputState.tick())) {
-            errorMessage = "Keyboard note entry currently works only on standard staves.";
+            errorMessage = "Keyboard note entry is unavailable on this staff.";
             return false;
         }
 
@@ -2945,6 +3001,122 @@
         return true;
     }
 
+    bool insertPercussionRest(mu::engraving::Score* score,
+                              mu::engraving::Segment* segment,
+                              const mu::engraving::staff_idx_t staffIndex,
+                              const mu::engraving::voice_idx_t voice,
+                              msr::render::ScoreEditState& output,
+                              std::string& errorMessage)
+    {
+        mu::engraving::InputState& inputState = score->inputState();
+        const auto track = staffIndex * mu::engraving::VOICES + voice;
+        if (!percussionTrackIsEditable(score, track, false)) {
+            errorMessage = "This voice is unavailable in the current part.";
+            return false;
+        }
+
+        const mu::engraving::InputState previousInput = inputState;
+        score->startCmd(muse::TranslatableString::untranslatable("MuseReader enter percussion rest"));
+        inputState.setTrack(track);
+        inputState.setSegment(segment);
+        normalizeNoteEntryDuration(inputState);
+        inputState.setRest(true);
+        inputState.setAccidentalType(mu::engraving::AccidentalType::NONE);
+        if (!inputState.isValid()) {
+            score->endCmd(true);
+            score->setInputState(previousInput);
+            errorMessage = "MuseReader could not locate the percussion rest position.";
+            return false;
+        }
+
+        const auto tick = inputState.tick();
+        score->enterRest(inputState.duration());
+        mu::engraving::ChordRest* rest = score->searchNote(tick, track);
+        if (!rest || rest->tick() != tick || !rest->isRest()) {
+            score->endCmd(true);
+            score->setInputState(previousInput);
+            errorMessage = "MuseReader could not place a percussion rest at that position.";
+            return false;
+        }
+
+        appendMeasureIfInputCursorReachedEnd(score);
+        const mu::engraving::InputState advancedInput = inputState;
+        score->select(rest, mu::engraving::SelectType::SINGLE, staffIndex);
+        score->setInputState(advancedInput);
+        score->endCmd();
+        refreshAfterEdit();
+        output = makeEditState(score);
+        return true;
+    }
+
+    bool insertMappedPercussionNote(mu::engraving::Score* score,
+                                    mu::engraving::Segment* segment,
+                                    const mu::engraving::staff_idx_t staffIndex,
+                                    const int pitch,
+                                    const bool addToExisting,
+                                    const bool advanceCursor,
+                                    msr::render::ScoreEditState& output,
+                                    std::string& errorMessage)
+    {
+        const mu::engraving::Drumset* drumset = drumsetForStaff(score->staff(staffIndex), segment->tick());
+        if (!drumset || !isValidPercussionPitch(*drumset, pitch)) {
+            errorMessage = "That percussion instrument is unavailable at the selected position.";
+            return false;
+        }
+        const auto track = staffIndex * mu::engraving::VOICES + drumset->voice(pitch);
+        if (!percussionTrackIsEditable(score, track, true)) {
+            errorMessage = "The voice mapped to this percussion instrument is unavailable in the current part.";
+            return false;
+        }
+
+        mu::engraving::InputState& inputState = score->inputState();
+        const mu::engraving::InputState previousInput = inputState;
+        score->startCmd(muse::TranslatableString::untranslatable("MuseReader enter percussion note"));
+        inputState.setTrack(track);
+        inputState.setSegment(segment);
+        normalizeNoteEntryDuration(inputState);
+        inputState.setRest(false);
+        inputState.setDrumNote(pitch);
+        inputState.setAccidentalType(mu::engraving::AccidentalType::NONE);
+        mu::engraving::Note* note = nullptr;
+        if (inputState.isValid()) {
+            mu::engraving::NoteVal noteValue(pitch);
+            noteValue.headGroup = drumset->noteHead(pitch);
+            mu::engraving::ChordRest* current = inputState.cr();
+            const bool addToChord = addToExisting && current && current->isChord()
+                && current->durationType() == inputState.duration();
+            if (addToChord) {
+                note = mu::engraving::toChord(current)->findNote(pitch);
+            }
+            if (note) {
+                // Repeated taps select the existing sound instead of deleting it.
+                inputState.moveToNextInputPos();
+            } else {
+                note = score->addPitch(noteValue, addToChord);
+            }
+        }
+        if (!note) {
+            score->endCmd(true);
+            score->setInputState(previousInput);
+            errorMessage = "MuseReader could not place the percussion note at that position.";
+            return false;
+        }
+
+        if (advanceCursor) {
+            appendMeasureIfInputCursorReachedEnd(score);
+        }
+        const mu::engraving::InputState advancedInput = inputState;
+        score->select(note, mu::engraving::SelectType::SINGLE, note->staffIdx());
+        if (advanceCursor) {
+            score->setInputState(advancedInput);
+        }
+        note->chord()->measure()->checkMultiVoices(staffIndex);
+        score->endCmd();
+        refreshAfterEdit();
+        output = makeEditState(score);
+        return true;
+    }
+
     bool insertNoteWithPitch(const int pageIndex,
                              const double normalizedX,
                              const double normalizedY,
@@ -2952,7 +3124,8 @@
                              const bool preferFlats,
                              const std::optional<int> accidentalKind,
                              msr::render::ScoreEditState& output,
-                             std::string& errorMessage)
+                             std::string& errorMessage,
+                             const std::optional<int> percussionPitch = std::nullopt)
     {
         if (!supportsEditing()) {
             errorMessage = "Editing is unavailable for this score session.";
@@ -2972,16 +3145,32 @@
             return false;
         }
 
+        if (!std::isfinite(normalizedX) || !std::isfinite(normalizedY)) {
+            errorMessage = "Tap inside a staff to enter a note or rest.";
+            return false;
+        }
         mu::engraving::PointF pagePoint = pointForNormalizedPagePosition(page, normalizedX, normalizedY);
         mu::engraving::Position position;
-        if (!getPagePosition(score, page, &position, pagePoint, inputState.voice())) {
+        if (!getPagePosition(score, page, &position, pagePoint, inputState.voice()) || !position.segment) {
             errorMessage = "Tap inside a staff to enter a note or rest.";
             return false;
         }
 
         mu::engraving::Staff* staff = score->staff(position.staffIdx);
-        if (!isStandardStaff(staff, position.segment->tick())) {
-            errorMessage = "Tap note entry currently works only on standard staves.";
+        if (!pitchClass && drumsetForStaff(staff, position.segment->tick())) {
+            const bool rest = inputState.rest() && !percussionPitch;
+            int drumPitch = -1;
+            if (!resolvePercussionPoint(staff, pagePoint, position, percussionPitch, rest, drumPitch)) {
+                errorMessage = "Choose a percussion sound available at this position.";
+                return false;
+            }
+            if (rest) {
+                return insertPercussionRest(score, position.segment, position.staffIdx, inputState.voice(), output, errorMessage);
+            }
+            return insertMappedPercussionNote(score, position.segment, position.staffIdx, drumPitch, true, true, output, errorMessage);
+        }
+        if (percussionPitch || !isStandardStaff(staff, position.segment->tick())) {
+            errorMessage = "This input is unavailable on the selected staff.";
             return false;
         }
         normalizePointInputPositionForPutNote(staff, position);

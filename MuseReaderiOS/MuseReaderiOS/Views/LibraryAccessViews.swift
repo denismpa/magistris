@@ -55,7 +55,7 @@ struct LibraryPaywallView: View {
         ScrollView {
             VStack(spacing: 0) {
                 HStack(spacing: 11) {
-                    Text("Aria")
+                    Text(verbatim: LibraryBrand.displayName)
                         .font(.system(size: 21, weight: .bold))
                         .foregroundStyle(LibraryPalette.ink)
 

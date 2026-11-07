@@ -13,6 +13,9 @@ struct ScoreReaderNoteEntrySurface: View {
     let editingState: ScoreEditingState
     let pendingPitchClass: Int?
     let pendingMIDIPitch: Int?
+    let selectedPercussionPitch: Int?
+    let selectPercussionInstrumentAction: (Int?) -> Void
+    let enterPercussionNoteAction: () -> Void
     let stackedChordInputEnabled: Bool
     let showsCompactModeToolbar: Bool
     let placesModeToolbarAbove: Bool
@@ -421,11 +424,13 @@ struct ScoreReaderNoteEntrySurface: View {
         .padding(.bottom, 18)
     }
 
+    @ViewBuilder
     private var pitchInputArea: some View {
-        VStack(spacing: 8) {
-            if showsPercussionUnsupportedNotice {
-                percussionUnsupportedNotice
-            }
+        if editingState.activeStaffIsPercussion {
+            percussionInputControls
+                .padding(.horizontal, 24)
+                .padding(.bottom, 18)
+        } else {
             pitchKeyboardRow
         }
     }
@@ -456,11 +461,16 @@ struct ScoreReaderNoteEntrySurface: View {
         }
     }
 
+    @ViewBuilder
     private var compactPitchInputArea: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if showsPercussionUnsupportedNotice {
-                percussionUnsupportedNotice
+        if editingState.activeStaffIsPercussion {
+            HStack(spacing: 4) {
+                compactUndoRedoColumn
+                percussionInputControls
+                    .frame(maxWidth: .infinity)
+                compactSelectionNavigationColumn
             }
+        } else {
             compactPitchKeyboardRow
         }
     }
@@ -490,26 +500,82 @@ struct ScoreReaderNoteEntrySurface: View {
         }
     }
 
+    @ViewBuilder
     private var compactLandscapePitchInputArea: some View {
-        VStack(spacing: 6) {
-            if showsPercussionUnsupportedNotice {
-                percussionUnsupportedNotice
+        if editingState.activeStaffIsPercussion {
+            HStack(spacing: 8) {
+                compactLandscapeUndoRedoColumn
+                percussionInputControls
+                    .frame(maxWidth: .infinity)
+                compactLandscapeSelectionNavigationColumn
             }
+        } else {
             compactLandscapePitchKeyboardRow
         }
     }
 
-    private var percussionUnsupportedNotice: some View {
-        Text("Percussion editing is not currently supported. Viewing and playback only.")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.black.opacity(0.72))
-            .multilineTextAlignment(.center)
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color.black.opacity(0.06), in: Capsule())
-            .padding(.horizontal, 14)
+    @ViewBuilder
+    private var percussionInputControls: some View {
+        let instruments = editingState.percussionInstruments
+        if instruments.isEmpty {
+            Text("This staff has no percussion mapping.")
+                .font(.caption)
+                .multilineTextAlignment(.center)
+                .frame(minHeight: 44)
+        } else {
+            let selectedInstrument = instruments.first { $0.midiPitch == selectedPercussionPitch }
+            let cursorInstrument = selectedInstrument ?? (instruments.count == 1 ? instruments.first : nil)
+            HStack(spacing: 10) {
+                Menu {
+                    Button {
+                        selectPercussionInstrumentAction(nil)
+                    } label: {
+                        if selectedInstrument == nil {
+                            Label("By staff position", systemImage: "checkmark")
+                        } else {
+                            Text("By staff position")
+                        }
+                    }
+                    ForEach(instruments) { instrument in
+                        Button {
+                            selectPercussionInstrumentAction(instrument.midiPitch)
+                        } label: {
+                            if selectedInstrument?.midiPitch == instrument.midiPitch {
+                                Label {
+                                    Text(verbatim: instrument.name)
+                                } icon: {
+                                    Image(systemName: "checkmark")
+                                }
+                            } else {
+                                Text(verbatim: instrument.name)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        if let cursorInstrument {
+                            Text(verbatim: cursorInstrument.name)
+                        } else {
+                            Text("By staff position")
+                        }
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .lineLimit(1)
+                    .frame(minHeight: 44)
+                }
+                .accessibilityLabel("Percussion instrument")
+                .accessibilityIdentifier("score.percussion.instrument")
+
+                Button(action: enterPercussionNoteAction) {
+                    Text(editingState.noteInputInsertsRests ? "Enter Rest" : "Enter Note")
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isBusy || (!editingState.noteInputInsertsRests && cursorInstrument == nil))
+                .accessibilityIdentifier("score.percussion.enter")
+            }
+            .padding(.horizontal, 4)
+        }
     }
 
     private var compactUndoRedoColumn: some View {
@@ -1198,10 +1264,6 @@ struct ScoreReaderNoteEntrySurface: View {
         return editingState.selection?.canChangePitch == true
         || editingState.noteInputEnabled
         || editingState.selection?.kind == .measure
-    }
-
-    private var showsPercussionUnsupportedNotice: Bool {
-        editingState.activeStaffIsPercussion
     }
 
     private var activePitchClass: Int? {

@@ -1,0 +1,73 @@
+name: Magistris iPadOS validation
+
+on:
+  push:
+    branches:
+      - feature/percussion-editing
+
+permissions:
+  contents: read
+
+jobs:
+  device-archive:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          persist-credentials: false
+
+      - name: Check the original handwriting recognizer
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc -swift-version 5 -default-isolation MainActor \
+            -enable-upcoming-feature NonisolatedNonsendingByDefault \
+            -module-cache-path "$RUNNER_TEMP/music-ink-module-cache" \
+            MuseReaderiOS/MuseReaderiOS/Models/Handwriting/MusicInkRecognizer.swift \
+            MuseReaderiOS/Checks/MusicInkRecognizerChecks.swift \
+            -o "$RUNNER_TEMP/music-ink-checks"
+          "$RUNNER_TEMP/music-ink-checks"
+
+      - name: Install the matching Qt SDKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          cmake --version
+          ninja --version
+          file MuseReaderiOS/MuseReaderiOS/Resources/MuseScore_General.sf2 | grep RIFF
+          python3 -m venv "$RUNNER_TEMP/aria-qt-tools"
+          "$RUNNER_TEMP/aria-qt-tools/bin/pip" install aqtinstall==3.3.0
+          aqt="$RUNNER_TEMP/aria-qt-tools/bin/aqt"
+          sdk="$RUNNER_TEMP/aria-qt"
+          "$aqt" install-qt mac desktop 6.11.0 clang_64 --outputdir "$sdk" \
+            --archives qtbase qtsvg qtdeclarative
+          "$aqt" install-qt mac ios 6.11.0 ios --outputdir "$sdk" \
+            --base https://qt.mirror.constant.com --archives qtbase qtsvg qtdeclarative
+
+      - name: Archive the unsigned device build
+        shell: bash
+        run: |
+          set -euo pipefail
+          qt="$RUNNER_TEMP/aria-qt/6.11.0"
+          archive="$RUNNER_TEMP/Magistris.xcarchive"
+          xcodebuild archive -project MuseReaderiOS/Aria.xcodeproj -scheme Aria \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$archive" -derivedDataPath "$RUNNER_TEMP/AriaDerivedData" \
+            ARCHS=arm64 CODE_SIGNING_ALLOWED=NO DEVELOPMENT_TEAM= \
+            MUSEREADER_QT_HOST_SDK_DIR="$qt/macos" MUSEREADER_QT_IOS_SDK_DIR="$qt/ios"
+          app="$archive/Products/Applications/Aria.app"
+          test -f "$app/Aria"
+          test "$(plutil -extract CFBundleDisplayName raw -o - "$app/Info.plist")" = Magistris
+          plutil -extract UIDeviceFamily json -o - "$app/Info.plist" | jq -e 'index(2) != null'
+          ditto -c -k --keepParent "$archive" "$RUNNER_TEMP/Magistris-unsigned.xcarchive.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Magistris-unsigned-${{ github.sha }}
+          path: ${{ runner.temp }}/Magistris-unsigned.xcarchive.zip
+          if-no-files-found: error
+          retention-days: 7

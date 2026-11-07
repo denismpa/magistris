@@ -79,6 +79,7 @@ extension ScoreReaderState {
         editingStateTask?.cancel()
         editingStateTask = nil
         editingStateRevision += 1
+        clearNoteEntryPreview()
         flushAutosaveOnShutdown()
         playbackMeasureHighlight = nil
         playbackController?.invalidate()

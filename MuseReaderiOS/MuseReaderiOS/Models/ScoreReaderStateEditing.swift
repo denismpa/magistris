@@ -500,6 +500,25 @@ extension ScoreReaderState {
         }
     }
 
+    var pencilNoteEntryEnabled: Bool {
+        noteInputIntent.enabled && !isExtendingSelection && partSelectionTask == nil
+    }
+
+    func activatePencilNoteEntry() -> Bool {
+        guard supportsEditing, isEditingMode, !isExtendingSelection,
+              partSelectionTask == nil, session.liveRenderSession != nil else {
+            return false
+        }
+
+        noteInputWasActivatedByPencil = true
+        if !noteInputIntent.enabled {
+            // The Pencil is already over the target. Entering note mode must
+            // not auto-scroll the page out from under it.
+            setNoteInputEnabled(true, revealActiveNotation: false)
+        }
+        return true
+    }
+
     func handlePageTap(
         pageIndex: Int,
         normalizedPoint: CGPoint,
@@ -508,37 +527,27 @@ extension ScoreReaderState {
     ) {
         #if os(Android) && ARIA_PHONE_AUDIT
         AndroidInteractionTrace.point("tap_handler_begin")
-        #endif
-        #if os(Android) && ARIA_PHONE_AUDIT
         defer { AndroidInteractionTrace.point("tap_handler_end") }
         #endif
 
-        guard
-            supportsEditing,
-            isEditingMode,
-            let liveRenderSession = session.liveRenderSession,
-            !isEditingActionInFlight
-        else {
+        guard supportsEditing, isEditingMode, partSelectionTask == nil,
+              let liveRenderSession = session.liveRenderSession else {
             return
         }
 
+        if inputKind == .pencil, pencilNoteEntryEnabled {
+            enqueuePencilNoteEntry(pageIndex: pageIndex, normalizedPoint: normalizedPoint)
+            return
+        }
+
+        guard !isEditingActionInFlight else { return }
         updateSelection(to: pageIndex)
         if isExtendingSelection {
             extendSelection(pageIndex: pageIndex, normalizedPoint: normalizedPoint)
             return
         }
-        let shouldInsert = editingState.noteInputEnabled
+        let wasEnteringNotes = noteInputIntent.enabled
         let selectionHitRadiusScale = inputKind == .pencil ? 0.52 : 1.0
-        let pendingAccidentalKind = self.pendingAccidentalKind
-        // WYSIWYG: when inserting with the Pencil, commit at the spot the live
-        // preview ghost was last shown (hover/fine-tune) instead of the tap's lift
-        // point, which drifts as the tip lands. Falls back to the tap point.
-        let pencilInsertionPoint: CGPoint = (shouldInsert && inputKind == .pencil)
-            ? (committedPencilAimPoint(forPage: pageIndex, near: normalizedPoint) ?? normalizedPoint)
-            : normalizedPoint
-        if shouldInsert && inputKind == .pencil {
-            clearPencilAimForModeTransition()
-        }
         isEditingActionInFlight = true
         editingErrorMessage = nil
 
@@ -552,53 +561,29 @@ extension ScoreReaderState {
             }
 
             do {
-                let newState: ScoreEditingState
-                if shouldInsert && inputKind == .pencil {
-                    newState = try await liveRenderSession.insertNote(
-                        pageIndex: pageIndex,
-                        normalizedPoint: pencilInsertionPoint,
-                        accidentalKind: pendingAccidentalKind
-                    )
-                } else if shouldInsert {
-                    let selectedState = try await liveRenderSession.selectElement(
-                        pageIndex: pageIndex,
-                        normalizedPoint: normalizedPoint,
-                        hitRadiusScale: selectionHitRadiusScale
-                    )
-                    if ScoreReaderToolModePolicy.selectionLeavesNoteInput(selectedState.selection?.kind) {
-                        newState = try await liveRenderSession.setNoteInputEnabled(false)
-                    } else {
-                        newState = selectedState
-                    }
-                } else {
-                    newState = try await liveRenderSession.selectElement(
-                        pageIndex: pageIndex,
-                        normalizedPoint: normalizedPoint,
-                        hitRadiusScale: selectionHitRadiusScale
-                    )
+                var newState = try await liveRenderSession.selectElement(
+                    pageIndex: pageIndex,
+                    normalizedPoint: normalizedPoint,
+                    hitRadiusScale: selectionHitRadiusScale
+                )
+                if wasEnteringNotes && ScoreReaderToolModePolicy.selectionLeavesNoteInput(newState.selection?.kind) {
+                    newState = try await liveRenderSession.setNoteInputEnabled(false)
                 }
 
                 #if os(Android) && ARIA_PHONE_AUDIT
                 AndroidInteractionTrace.point("selection_main_resumed")
                 #endif
-                if shouldInsert {
-                    if newState.noteInputEnabled {
-                        self?.hasContinuousNoteInputCursor = true
-                        self?.lastKeyboardInputCanReceiveAccidental = false
-                        self?.pendingAccidentalKind = nil
-                        self?.pendingPreferFlats = false
-                        self?.refreshAfterScoreMutation(with: newState, auditionNote: true, revealActiveNotation: true)
-                    } else {
-                        self?.hasContinuousNoteInputCursor = false
-                        self?.lastKeyboardInputCanReceiveAccidental = false
-                        self?.pendingAccidentalKind = nil
-                        self?.pendingPreferFlats = false
-                        self?.applyEditingState(newState)
-                    }
-                } else {
-                    self?.hasContinuousNoteInputCursor = false
-                    self?.lastKeyboardInputCanReceiveAccidental = false
-                    self?.applyEditingState(newState)
+                self?.hasContinuousNoteInputCursor = wasEnteringNotes && newState.noteInputEnabled
+                self?.lastKeyboardInputCanReceiveAccidental = false
+                if wasEnteringNotes {
+                    self?.pendingAccidentalKind = nil
+                    self?.pendingPreferFlats = false
+                }
+                self?.applyEditingState(newState)
+                if wasEnteringNotes && newState.noteInputEnabled {
+                    self?.auditionSelectedNote(in: newState)
+                    self?.revealActiveSelection(in: newState)
+                } else if !wasEnteringNotes {
                     self?.auditionSelectedChordSymbol(in: newState)
                 }
                 selectionAction?(newState.selection)
@@ -608,125 +593,83 @@ extension ScoreReaderState {
         }
     }
 
-    /// Returns the last Pencil aim point if it's fresh, on the same page, and close
-    /// enough to the tap to represent the same target; otherwise nil (use tap point).
-    private func committedPencilAimPoint(forPage pageIndex: Int, near tapPoint: CGPoint) -> CGPoint? {
-        guard
-            let aim = lastPencilAimNormalizedPoint,
-            lastPencilAimPageIndex == pageIndex,
-            let timestamp = lastPencilAimTimestamp,
-            Date().timeIntervalSince(timestamp) <= 0.4
-        else {
-            return nil
-        }
-
-        let dx = aim.x - tapPoint.x
-        let dy = aim.y - tapPoint.y
-        guard (dx * dx + dy * dy).squareRoot() <= 0.05 else {
-            return nil
-        }
-
-        return aim
-    }
-
-    func clearPencilAimForModeTransition() {
-        lastPencilAimNormalizedPoint = nil
-        lastPencilAimPageIndex = nil
-        lastPencilAimTimestamp = nil
-    }
-
-    func handlePencilNoteEntryFineTune(
-        pageIndex: Int,
-        startNormalizedPoint _: CGPoint,
-        dropNormalizedPoint: CGPoint
-    ) {
-        guard
-            supportsEditing,
-            isEditingMode,
-            let liveRenderSession = session.liveRenderSession,
-            !isEditingActionInFlight
-        else {
+    func enqueuePencilNoteEntry(pageIndex: Int, normalizedPoint: CGPoint) {
+        guard supportsEditing, isEditingMode, pencilNoteEntryEnabled,
+              session.liveRenderSession != nil, isValid(pageIndex) else {
             return
         }
 
         updateSelection(to: pageIndex)
-        let pendingAccidentalKind = self.pendingAccidentalKind
-        isEditingActionInFlight = true
-        editingErrorMessage = nil
+        clearNoteEntryPreview()
+        let intent = noteInputIntent
+        let accidentalKind = intent.rests ? nil : pendingAccidentalKind
+        let percussionPitch = intent.rests ? nil : selectedPercussionPitch
+        pendingAccidentalKind = nil
+        pendingPreferFlats = false
+        lastKeyboardInputCanReceiveAccidental = false
+        hasContinuousNoteInputCursor = true
 
-        Task { @MainActor [weak self] in
-            defer {
-                self?.isEditingActionInFlight = false
-            }
-
-            do {
-                let insertedState = try await liveRenderSession.insertNote(
-                    pageIndex: pageIndex,
-                    normalizedPoint: dropNormalizedPoint,
-                    accidentalKind: pendingAccidentalKind
-                )
-                self?.hasContinuousNoteInputCursor = true
-                self?.lastKeyboardInputCanReceiveAccidental = false
-                self?.pendingAccidentalKind = nil
-                self?.pendingPreferFlats = false
-                self?.refreshAfterScoreMutation(with: insertedState, auditionNote: true, revealActiveNotation: true)
-            } catch {
-                self?.editingErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            }
+        // Queue behind note-mode activation and toolbar changes already
+        // accepted by the reader. A quick first tap can arrive before the
+        // engine has replied to activation, especially without Pencil hover.
+        performEditingAction(mutatesScore: true, auditionNote: true, revealActiveNotation: true) { session in
+            try await Self.insertScoreNote(
+                in: session,
+                pageIndex: pageIndex,
+                normalizedPoint: normalizedPoint,
+                accidentalKind: accidentalKind,
+                percussionPitch: percussionPitch
+            )
         }
     }
 
+    func clearNoteEntryPreview() {
+        guard noteEntryPreviewTarget != nil || noteEntryPreviewTask != nil || noteEntryPreview != nil else { return }
+        noteEntryPreviewTarget = nil
+        noteEntryPreviewRevision += 1
+        noteEntryPreviewTask?.cancel()
+        noteEntryPreviewTask = nil
+        noteEntryPreview = nil
+    }
+
     func updateNoteEntryPreview(pageIndex: Int, normalizedPoint: CGPoint?) {
-        guard isEditingMode else {
-            noteEntryPreviewTask?.cancel()
-            noteEntryPreview = nil
-            clearPencilAimForModeTransition()
+        guard let normalizedPoint else {
+            if noteEntryPreviewTarget?.pageIndex == pageIndex { clearNoteEntryPreview() }
             return
         }
 
-        if let normalizedPoint {
-            lastPencilAimNormalizedPoint = normalizedPoint
-            lastPencilAimPageIndex = pageIndex
-            lastPencilAimTimestamp = Date()
-        }
+        guard isEditingMode, pencilNoteEntryEnabled, supportsEditing else { return }
+        if noteEntryPreviewTarget?.pageIndex != pageIndex { noteEntryPreview = nil }
+        noteEntryPreviewTarget = (pageIndex, normalizedPoint)
+        requestNoteEntryPreview()
+    }
 
+    private func requestNoteEntryPreview() {
         noteEntryPreviewRevision += 1
         let revision = noteEntryPreviewRevision
         noteEntryPreviewTask?.cancel()
 
-        guard
-            let normalizedPoint,
-            editingState.noteInputEnabled,
-            supportsEditing,
-            let liveRenderSession = session.liveRenderSession
-        else {
+        guard let target = noteEntryPreviewTarget, isEditingMode, pencilNoteEntryEnabled,
+              editingCommandTask == nil, let liveRenderSession = session.liveRenderSession else {
             noteEntryPreview = nil
             return
         }
 
-        let duration = editingState.duration
-        let isRest = editingState.noteInputInsertsRests
+        let intent = noteInputIntent
         let accidentalKind = pendingAccidentalKind
+        let percussionPitch = selectedPercussionPitch
         noteEntryPreviewTask = Task { @MainActor [weak self] in
-            do {
-                let preview = try await liveRenderSession.noteEntryPreview(
-                    pageIndex: pageIndex,
-                    normalizedPoint: normalizedPoint,
-                    duration: duration,
-                    isRest: isRest,
-                    accidentalKind: accidentalKind
-                )
-                guard !Task.isCancelled, self?.noteEntryPreviewRevision == revision else {
-                    return
-                }
-                if let preview {
-                    self?.noteEntryPreview = preview
-                }
-            } catch {
-                guard !Task.isCancelled, self?.noteEntryPreviewRevision == revision else {
-                    return
-                }
-            }
+            guard !Task.isCancelled else { return }
+            let preview = try? await liveRenderSession.noteEntryPreview(
+                pageIndex: target.pageIndex,
+                normalizedPoint: target.normalizedPoint,
+                duration: intent.duration,
+                isRest: intent.rests,
+                accidentalKind: accidentalKind,
+                percussionPitch: percussionPitch
+            )
+            guard !Task.isCancelled, self?.noteEntryPreviewRevision == revision else { return }
+            self?.noteEntryPreview = preview
         }
     }
 
@@ -787,7 +730,7 @@ extension ScoreReaderState {
                 self?.noteInputWasActivatedByPencil = false
                 self?.lastKeyboardInputCanReceiveAccidental = false
                 self?.stackedChordInputEnabled = false
-                self?.updateNoteEntryPreview(pageIndex: pageIndex, normalizedPoint: nil)
+                self?.clearNoteEntryPreview()
                 self?.applyEditingState(newState)
                 self?.clearMeasureRangePreview()
             } catch {
@@ -831,11 +774,57 @@ extension ScoreReaderState {
         measureRangePreviewSelection = nil
     }
 
+    private static func insertScoreNote(in session: LiveScoreRenderSession, pageIndex: Int,
+                                        normalizedPoint: CGPoint, accidentalKind: ScoreAccidentalKind?,
+                                        percussionPitch: Int?) async throws -> ScoreEditingState {
+        if let percussionPitch {
+            return try await session.insertPercussionNote(
+                pageIndex: pageIndex, normalizedPoint: normalizedPoint, midiPitch: percussionPitch
+            )
+        }
+        return try await session.insertNote(
+            pageIndex: pageIndex, normalizedPoint: normalizedPoint, accidentalKind: accidentalKind
+        )
+    }
+
+    func selectPercussionInstrument(_ midiPitch: Int?) {
+        selectedPercussionPitch = midiPitch
+        if noteEntryPreviewTarget != nil {
+            requestNoteEntryPreview()
+        }
+    }
+
+    func enterSelectedPercussionNote() {
+        guard supportsEditing, isEditingMode, session.liveRenderSession != nil,
+              editingState.activeStaffIsPercussion else { return }
+
+        let instruments = editingState.percussionInstruments
+        let pitch = selectedPercussionPitch ?? (instruments.count == 1 ? instruments.first?.midiPitch : nil)
+        var intent = noteInputIntent
+        guard intent.rests || pitch != nil else { return }
+        intent.enabled = true
+        intent.chord = intent.chord && !intent.rests
+        queuedNoteInputIntent = intent
+        let submittedIntent = intent
+        hasContinuousNoteInputCursor = true
+        lastKeyboardInputCanReceiveAccidental = false
+        pendingAccidentalKind = nil
+        performEditingAction(mutatesScore: true, auditionNote: true, revealActiveNotation: true) { session in
+            _ = try await Self.prepareNoteInput(submittedIntent, in: session)
+            if let pitch, !submittedIntent.rests {
+                return try await session.insertMIDIPitchAtCursor(
+                    pitch, preferFlats: false, addToCurrentChord: submittedIntent.chord
+                )
+            }
+            return try await session.enterRestAtCursor()
+        }
+    }
+
     func toggleNoteInput() {
         setNoteInputEnabled(!noteInputIntent.enabled)
     }
 
-    func setNoteInputEnabled(_ enabled: Bool) {
+    func setNoteInputEnabled(_ enabled: Bool, revealActiveNotation: Bool = true) {
         guard supportsEditing, isEditingMode, session.liveRenderSession != nil else { return }
         var intent = noteInputIntent
         intent.enabled = enabled
@@ -846,10 +835,10 @@ extension ScoreReaderState {
             lastKeyboardInputCanReceiveAccidental = false
             stackedChordInputEnabled = false
             queuedNoteInputIntent?.chord = false
-            updateNoteEntryPreview(pageIndex: selectedPageIndex, normalizedPoint: nil)
+            clearNoteEntryPreview()
         }
         let voice = intent.voice
-        performEditingAction(mutatesScore: false, revealActiveNotation: enabled) { session in
+        performEditingAction(mutatesScore: false, revealActiveNotation: enabled && revealActiveNotation) { session in
             var state = try await session.setNoteInputEnabled(enabled)
             if enabled && state.currentVoice != voice { state = try await session.setCurrentVoice(voice) }
             return state
@@ -876,7 +865,8 @@ extension ScoreReaderState {
         if shouldEnterRestAtCursor { intent.rests = true }
         else { intent.rests.toggle() }
         queuedNoteInputIntent = intent
-        performEditingAction(mutatesScore: intent.enabled || editingState.selection != nil) { session in
+        let mutatesScore = shouldEnterRestAtCursor || (!intent.enabled && editingState.selection != nil)
+        performEditingAction(mutatesScore: mutatesScore) { session in
             if shouldEnterRestAtCursor { return try await session.enterRestAtCursor() }
             return try await session.toggleRest()
         }
@@ -1833,9 +1823,6 @@ extension ScoreReaderState {
             return
         }
 
-        noteEntryPreviewRevision += 1
-        noteEntryPreviewTask?.cancel()
-        noteEntryPreview = nil
         var intent = noteInputIntent
         let changesSelectedVoice = !intent.enabled
             && (editingState.selection?.kind == .note || editingState.selection?.kind == .rest)
@@ -2003,6 +1990,10 @@ extension ScoreReaderState {
             pendingAccidentalKind = accidentalKind
             pendingPreferFlats = accidentalKind == .flat
         }
+        if noteEntryPreviewTarget != nil {
+            noteEntryPreview = nil
+            requestNoteEntryPreview()
+        }
         editingErrorMessage = nil
     }
 
@@ -2082,6 +2073,10 @@ extension ScoreReaderState {
         editingCommandQueue.append(ScoreQueuedEditingCommand(mutatesScore: mutatesScore,
             auditionNote: auditionNote, revealActiveNotation: revealActiveNotation, action: action))
         guard editingCommandTask == nil else { return }
+        if noteEntryPreviewTarget != nil {
+            noteEntryPreviewTask?.cancel()
+            noteEntryPreview = nil
+        }
         let waitsForExistingAction = isEditingActionInFlight
         if !waitsForExistingAction { isEditingActionInFlight = true }
         // Keep the reader/session alive until accepted commands and their refresh finish.
@@ -2244,6 +2239,9 @@ extension ScoreReaderState {
         #if os(Android) && ARIA_PHONE_AUDIT
         AndroidInteractionTrace.point("editing_state_write_begin")
         #endif
+        if editingState.percussionInstruments != self.editingState.percussionInstruments {
+            selectedPercussionPitch = nil
+        }
         self.editingState = editingState
         #if os(Android) && ARIA_PHONE_AUDIT
         AndroidInteractionTrace.point("editing_state_write_end")
@@ -2283,9 +2281,10 @@ extension ScoreReaderState {
             stackedChordInputEnabled = false
         }
         if !editingState.noteInputEnabled {
-            noteEntryPreviewTask?.cancel()
-            noteEntryPreview = nil
+            clearNoteEntryPreview()
             lastKeyboardInputCanReceiveAccidental = false
+        } else if editingCommandTask == nil, noteEntryPreviewTarget != nil {
+            requestNoteEntryPreview()
         }
         if editingState.selection?.canChangePitch != true {
             shouldEditSelectedPitchBeforeContinuingKeyboardInput = false
@@ -2353,6 +2352,7 @@ extension ScoreReaderState {
     }
 
     func refreshAfterScoreMutation(with editingState: ScoreEditingState, auditionNote: Bool = false, revealActiveNotation: Bool = false) {
+        scoreMutationRevision += 1
         #if os(Android) && ARIA_PHONE_AUDIT
         AndroidInteractionTrace.point("refresh_mutation_begin")
         #endif

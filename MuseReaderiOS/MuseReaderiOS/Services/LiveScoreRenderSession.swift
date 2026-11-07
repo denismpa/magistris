@@ -903,6 +903,67 @@ actor LiveScoreRenderSession {
         return editState
     }
 
+    #if !os(Android)
+    func handwritingTargetForSelection() throws -> ScoreHandwritingTarget {
+        let state = try bridgeSession.currentEditState()
+        let target = try bridgeSession.handwritingContext(voice: state.currentVoice)
+        return ScoreHandwritingTarget(
+            token: target.token,
+            pageIndex: target.pageIndex,
+            measureIndex: target.measureIndex,
+            staffIndex: target.staffIndex,
+            voice: target.voice,
+            measureStartTick: target.measureStartTick,
+            durationTicks: target.durationTicks,
+            timeSignatureNumerator: target.timeSignatureNumerator,
+            timeSignatureDenominator: target.timeSignatureDenominator,
+            clef: target.clef,
+            key: target.key,
+            measureRect: ScoreNormalizedRect(
+                x: target.measureRect.normalizedX, y: target.measureRect.normalizedY,
+                width: target.measureRect.normalizedWidth, height: target.measureRect.normalizedHeight
+            ),
+            staffTopNormalizedY: target.staffTopNormalizedY,
+            staffHalfStepNormalizedY: target.staffHalfStepNormalizedY,
+            inputStartNormalizedX: target.inputStartNormalizedX,
+            inputEndNormalizedX: target.inputEndNormalizedX
+        )
+    }
+
+    func previewHandwriting(_ events: [ScoreHandwritingEvent],
+                            target: ScoreHandwritingTarget) throws -> ScoreHandwritingPreview {
+        try Task.checkCancellation()
+        let page = try bridgeSession.previewHandwriting(
+            targetToken: target.token, events: handwritingBridgeEvents(events)
+        )
+        return ScoreHandwritingPreview(
+            pageIndex: page.pageIndex, pixelWidth: page.pixelWidth, pixelHeight: page.pixelHeight,
+            imageData: page.imageData
+        )
+    }
+
+    func commitHandwriting(_ events: [ScoreHandwritingEvent],
+                           target: ScoreHandwritingTarget) throws -> ScoreEditingState {
+        let state = try makeEditingState(
+            from: bridgeSession.applyHandwriting(
+                targetToken: target.token, events: handwritingBridgeEvents(events)
+            ),
+            refreshScope: .nearby
+        )
+        invalidateCachedPlaybackArtifacts()
+        return state
+    }
+
+    private func handwritingBridgeEvents(_ events: [ScoreHandwritingEvent]) -> [MSRHandwritingEventInfo] {
+        events.map { event in
+            MSRHandwritingEventInfo(
+                offsetTicks: event.offsetTicks, durationCode: event.durationCode, dots: event.dots,
+                staffLine: event.staffLine, accidentalKind: event.accidentalKind, rest: event.rest
+            )
+        }
+    }
+    #endif
+
     func insertNote(pageIndex: Int, normalizedPoint: CGPoint) throws -> ScoreEditingState {
         guard supportsEditing else {
             return inactiveEditingState()
@@ -958,6 +1019,23 @@ actor LiveScoreRenderSession {
         return editState
     }
 
+    func insertPercussionNote(pageIndex: Int, normalizedPoint: CGPoint, midiPitch: Int) throws -> ScoreEditingState {
+        guard supportsEditing else {
+            return inactiveEditingState()
+        }
+
+        let editState = try makeEditingState(
+            from: bridgeSession.insertPercussionNote(
+                pageIndex: pageIndex,
+                normalizedX: normalizedPoint.x,
+                normalizedY: normalizedPoint.y,
+                midiPitch: midiPitch
+            )
+        )
+        invalidateCachedPlaybackArtifacts()
+        return editState
+    }
+
     func insertPitchAtCursor(_ pitchClass: Int, preferFlats: Bool, addToCurrentChord: Bool = false) throws -> ScoreEditingState {
         #if os(Android) && ARIA_PHONE_AUDIT
         AndroidPhoneAuditLog.mark("insert_pitch_worker_start")
@@ -1006,19 +1084,33 @@ actor LiveScoreRenderSession {
         return editState
     }
 
-    func noteEntryPreview(pageIndex: Int, normalizedPoint: CGPoint, duration: ScoreNoteDuration, isRest: Bool, accidentalKind: ScoreAccidentalKind?) throws -> ScoreNoteEntryPreview? {
+    func noteEntryPreview(pageIndex: Int, normalizedPoint: CGPoint, duration: ScoreNoteDuration,
+                          isRest: Bool, accidentalKind: ScoreAccidentalKind?,
+                          percussionPitch: Int? = nil) throws -> ScoreNoteEntryPreview? {
+        try Task.checkCancellation()
         guard supportsEditing else {
             return nil
         }
 
-        let bridgePreview = try bridgeSession.noteEntryPreview(
-            pageIndex: pageIndex,
-            normalizedX: Double(normalizedPoint.x),
-            normalizedY: Double(normalizedPoint.y),
-            durationCode: duration.rawValue,
-            rest: isRest,
-            accidentalKind: accidentalKind?.rawValue ?? -1
-        )
+        let bridgePreview: MSRNoteEntryPreviewInfo
+        if let percussionPitch, !isRest {
+            bridgePreview = try bridgeSession.percussionNoteEntryPreview(
+                pageIndex: pageIndex,
+                normalizedX: Double(normalizedPoint.x),
+                normalizedY: Double(normalizedPoint.y),
+                durationCode: duration.rawValue,
+                midiPitch: percussionPitch
+            )
+        } else {
+            bridgePreview = try bridgeSession.noteEntryPreview(
+                pageIndex: pageIndex,
+                normalizedX: Double(normalizedPoint.x),
+                normalizedY: Double(normalizedPoint.y),
+                durationCode: duration.rawValue,
+                rest: isRest,
+                accidentalKind: accidentalKind?.rawValue ?? -1
+            )
+        }
 
         guard !bridgePreview.overlayImageData.isEmpty else {
             return nil
@@ -1680,6 +1772,15 @@ actor LiveScoreRenderSession {
             canUndo: editState.canUndo,
             canRedo: editState.canRedo,
             activeStaffIsPercussion: editState.activeStaffIsPercussion,
+            percussionInstruments: editState.percussionInstruments.map { instrument in
+                ScorePercussionInstrument(
+                    midiPitch: instrument.midiPitch,
+                    name: instrument.name,
+                    staffLine: instrument.staffLine,
+                    voice: instrument.voice,
+                    notehead: instrument.notehead
+                )
+            },
             createMultiMeasureRests: editState.createMultiMeasureRests,
             hideEmptyStaves: editState.hideEmptyStaves,
             staffSpacingSpatium: editState.staffSpacingSpatium,

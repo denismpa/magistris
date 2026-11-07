@@ -288,8 +288,59 @@ MSRPickupMeasureInfo *MakePickupMeasureInfo(const msr::render::PickupMeasureStat
                                        nominalDenominator:pickupState.nominalDenominator];
 }
 
+std::vector<msr::render::HandwritingEvent> MakeHandwritingEvents(NSArray<MSRHandwritingEventInfo *> *events)
+{
+    std::vector<msr::render::HandwritingEvent> output;
+    output.reserve(events.count);
+    for (MSRHandwritingEventInfo *event in events) {
+        output.push_back({
+            static_cast<int>(event.offsetTicks),
+            static_cast<int>(event.durationCode),
+            static_cast<int>(event.dots),
+            static_cast<int>(event.staffLine),
+            static_cast<int>(event.accidentalKind),
+            static_cast<bool>(event.rest)
+        });
+    }
+    return output;
+}
+
+MSRHandwritingContextInfo *MakeHandwritingContext(const msr::render::HandwritingContext& context)
+{
+    MSRNormalizedRectInfo *rect = [[MSRNormalizedRectInfo alloc] initWithNormalizedX:context.measureRect.normalizedX
+                                                                      normalizedY:context.measureRect.normalizedY
+                                                                  normalizedWidth:context.measureRect.normalizedWidth
+                                                                 normalizedHeight:context.measureRect.normalizedHeight];
+    return [[MSRHandwritingContextInfo alloc] initWithToken:[NSString stringWithUTF8String:context.token.c_str()]
+                                                pageIndex:context.pageIndex
+                                             measureIndex:context.measureIndex
+                                               staffIndex:context.staffIndex
+                                                    voice:context.voice
+                                         measureStartTick:context.measureStartTick
+                                            durationTicks:context.durationTicks
+                                   timeSignatureNumerator:context.timeSignatureNumerator
+                                 timeSignatureDenominator:context.timeSignatureDenominator
+                                                     clef:[NSString stringWithUTF8String:context.clef.c_str()]
+                                                      key:context.key
+                                              measureRect:rect
+                                      staffTopNormalizedY:context.staffTopNormalizedY
+                                 staffHalfStepNormalizedY:context.staffHalfStepNormalizedY
+                                    inputStartNormalizedX:context.inputStartNormalizedX
+                                      inputEndNormalizedX:context.inputEndNormalizedX];
+}
+
 MSREditState *MakeEditState(const msr::render::ScoreEditState& editState)
 {
+    NSMutableArray<MSRPercussionInstrumentInfo *> *instruments =
+        [NSMutableArray arrayWithCapacity:editState.percussionInstruments.size()];
+    for (const auto& instrument : editState.percussionInstruments) {
+        NSString *name = [NSString stringWithUTF8String:instrument.name.c_str()] ?: @"";
+        [instruments addObject:[[MSRPercussionInstrumentInfo alloc] initWithMIDIPitch:instrument.midiPitch
+                                                                                name:name
+                                                                           staffLine:instrument.staffLine
+                                                                               voice:instrument.voice
+                                                                            notehead:instrument.notehead]];
+    }
     MSREditState *state = [[MSREditState alloc] initWithSelection:MakeSelectionInfo(editState.selection)
                                   noteInputEnabled:editState.noteInputEnabled
                              noteInputInsertsRests:editState.noteInputInsertsRests
@@ -299,6 +350,7 @@ MSREditState *MakeEditState(const msr::render::ScoreEditState& editState)
                                            canUndo:editState.canUndo
                                            canRedo:editState.canRedo
                          activeStaffIsPercussion:editState.activeStaffIsPercussion
+                           percussionInstruments:instruments
                             createMultiMeasureRests:editState.createMultiMeasureRests
                                      hideEmptyStaves:editState.hideEmptyStaves
                              pageWidthMillimeters:editState.pageWidthMillimeters
@@ -639,6 +691,93 @@ MSREditState *MakeEditState(const msr::render::ScoreEditState& editState)
 
 @end
 
+@implementation MSRHandwritingEventInfo
+
+- (instancetype)initWithOffsetTicks:(NSInteger)offsetTicks
+                       durationCode:(NSInteger)durationCode
+                       dots:(NSInteger)dots
+                       staffLine:(NSInteger)staffLine
+                       accidentalKind:(NSInteger)accidentalKind
+                       rest:(BOOL)rest
+{
+    self = [super init];
+    if (self) {
+        _offsetTicks = offsetTicks;
+        _durationCode = durationCode;
+        _dots = dots;
+        _staffLine = staffLine;
+        _accidentalKind = accidentalKind;
+        _rest = rest;
+    }
+    return self;
+}
+
+@end
+
+@implementation MSRHandwritingContextInfo
+
+- (instancetype)initWithToken:(NSString *)token
+                       pageIndex:(NSInteger)pageIndex
+                       measureIndex:(NSInteger)measureIndex
+                       staffIndex:(NSInteger)staffIndex
+                       voice:(NSInteger)voice
+                       measureStartTick:(int64_t)measureStartTick
+                       durationTicks:(NSInteger)durationTicks
+                       timeSignatureNumerator:(NSInteger)timeSignatureNumerator
+                       timeSignatureDenominator:(NSInteger)timeSignatureDenominator
+                       clef:(NSString *)clef
+                       key:(NSInteger)key
+                       measureRect:(MSRNormalizedRectInfo *)measureRect
+                       staffTopNormalizedY:(double)staffTopNormalizedY
+                       staffHalfStepNormalizedY:(double)staffHalfStepNormalizedY
+                       inputStartNormalizedX:(double)inputStartNormalizedX
+                       inputEndNormalizedX:(double)inputEndNormalizedX
+{
+    self = [super init];
+    if (self) {
+        _token = [token copy];
+        _pageIndex = pageIndex;
+        _measureIndex = measureIndex;
+        _staffIndex = staffIndex;
+        _voice = voice;
+        _measureStartTick = measureStartTick;
+        _durationTicks = durationTicks;
+        _timeSignatureNumerator = timeSignatureNumerator;
+        _timeSignatureDenominator = timeSignatureDenominator;
+        _clef = [clef copy];
+        _key = key;
+        _measureRect = measureRect;
+        _staffTopNormalizedY = staffTopNormalizedY;
+        _staffHalfStepNormalizedY = staffHalfStepNormalizedY;
+        _inputStartNormalizedX = inputStartNormalizedX;
+        _inputEndNormalizedX = inputEndNormalizedX;
+    }
+    return self;
+}
+
+@end
+
+@implementation MSRPercussionInstrumentInfo
+
+- (instancetype)initWithMIDIPitch:(NSInteger)midiPitch
+                             name:(NSString *)name
+                        staffLine:(NSInteger)staffLine
+                            voice:(NSInteger)voice
+                         notehead:(NSInteger)notehead
+{
+    self = [super init];
+    if (self) {
+        _midiPitch = midiPitch;
+        _name = [name copy];
+        _staffLine = staffLine;
+        _voice = voice;
+        _notehead = notehead;
+    }
+    return self;
+}
+
+@end
+
 @implementation MSREditState
 
 - (instancetype)initWithSelection:(MSRSelectionInfo * _Nullable)selection
@@ -650,6 +789,7 @@ MSREditState *MakeEditState(const msr::render::ScoreEditState& editState)
                           canUndo:(BOOL)canUndo
                           canRedo:(BOOL)canRedo
          activeStaffIsPercussion:(BOOL)activeStaffIsPercussion
+           percussionInstruments:(NSArray<MSRPercussionInstrumentInfo *> *)percussionInstruments
            createMultiMeasureRests:(BOOL)createMultiMeasureRests
                     hideEmptyStaves:(BOOL)hideEmptyStaves
              pageWidthMillimeters:(double)pageWidthMillimeters
@@ -670,6 +810,7 @@ MSREditState *MakeEditState(const msr::render::ScoreEditState& editState)
         _canUndo = canUndo;
         _canRedo = canRedo;
         _activeStaffIsPercussion = activeStaffIsPercussion;
+        _percussionInstruments = [percussionInstruments copy];
         _createMultiMeasureRests = createMultiMeasureRests;
         _hideEmptyStaves = hideEmptyStaves;
         _pageWidthMillimeters = pageWidthMillimeters;
@@ -2970,6 +3111,92 @@ MSREditState *MakeEditState(const msr::render::ScoreEditState& editState)
 #endif
 }
 
+- (MSRHandwritingContextInfo *)handwritingContextForVoice:(NSInteger)voice
+                                                           error:(NSError * _Nullable __autoreleasing *)error
+{
+#if defined(MUSEREADER_USE_SCORE_RENDER_CORE) && MUSEREADER_USE_SCORE_RENDER_CORE
+    if (!_session) {
+        if (error) {
+            *error = FailureError(@"The MuseScore render session is no longer available.");
+        }
+        return nil;
+    }
+
+    msr::render::HandwritingContext result;
+    std::string errorMessage;
+    if (!_session->handwritingContext(static_cast<int>(voice), result, errorMessage)) {
+        if (error) {
+            *error = FailureError(FailureMessage(errorMessage, @"Select an empty treble or bass bar before writing."));
+        }
+        return nil;
+    }
+    return MakeHandwritingContext(result);
+#else
+    if (error) {
+        *error = UnavailableError(@"Handwriting conversion requires the MuseScore render core.");
+    }
+    return nil;
+#endif
+}
+
+- (MSRRenderedPage *)previewHandwritingWithTargetToken:(NSString *)targetToken
+                                                       events:(NSArray<MSRHandwritingEventInfo *> *)events
+                                                        error:(NSError * _Nullable __autoreleasing *)error
+{
+#if defined(MUSEREADER_USE_SCORE_RENDER_CORE) && MUSEREADER_USE_SCORE_RENDER_CORE
+    if (!_session) {
+        if (error) {
+            *error = FailureError(@"The MuseScore render session is no longer available.");
+        }
+        return nil;
+    }
+
+    msr::render::RenderedPage result;
+    std::string errorMessage;
+    if (!_session->previewHandwriting(targetToken.UTF8String, MakeHandwritingEvents(events), result, errorMessage)) {
+        if (error) {
+            *error = FailureError(FailureMessage(errorMessage, @"The handwritten bar could not be previewed."));
+        }
+        return nil;
+    }
+    return MakeRenderedPage(result);
+#else
+    if (error) {
+        *error = UnavailableError(@"Handwriting conversion requires the MuseScore render core.");
+    }
+    return nil;
+#endif
+}
+
+- (MSREditState *)applyHandwritingWithTargetToken:(NSString *)targetToken
+                                                  events:(NSArray<MSRHandwritingEventInfo *> *)events
+                                                   error:(NSError * _Nullable __autoreleasing *)error
+{
+#if defined(MUSEREADER_USE_SCORE_RENDER_CORE) && MUSEREADER_USE_SCORE_RENDER_CORE
+    if (!_session) {
+        if (error) {
+            *error = FailureError(@"The MuseScore render session is no longer available.");
+        }
+        return nil;
+    }
+
+    msr::render::ScoreEditState result;
+    std::string errorMessage;
+    if (!_session->applyHandwriting(targetToken.UTF8String, MakeHandwritingEvents(events), result, errorMessage)) {
+        if (error) {
+            *error = FailureError(FailureMessage(errorMessage, @"The handwritten bar could not be converted."));
+        }
+        return nil;
+    }
+    return MakeEditState(result);
+#else
+    if (error) {
+        *error = UnavailableError(@"Handwriting conversion requires the MuseScore render core.");
+    }
+    return nil;
+#endif
+}
+
 - (MSREditState *)insertNoteAtPageIndex:(NSInteger)pageIndex
                             normalizedX:(double)normalizedX
                             normalizedY:(double)normalizedY
@@ -3053,6 +3280,39 @@ MSREditState *MakeEditState(const msr::render::ScoreEditState& editState)
     if (!_session->insertNoteWithPitch(static_cast<int>(pageIndex), normalizedX, normalizedY, static_cast<int>(pitchClass), preferFlats, editState, errorMessage)) {
         if (error) {
             *error = FailureError(FailureMessage(errorMessage, @"The MuseScore render core could not place a note there."));
+        }
+        return nil;
+    }
+
+    return MakeEditState(editState);
+#else
+    if (error) {
+        *error = UnavailableError(@"This build of Aria is not linked to MuseScore editing support yet.");
+    }
+    return nil;
+#endif
+}
+
+- (MSREditState *)insertPercussionNoteAtPageIndex:(NSInteger)pageIndex
+                                       normalizedX:(double)normalizedX
+                                       normalizedY:(double)normalizedY
+                                         midiPitch:(NSInteger)midiPitch
+                                             error:(NSError * _Nullable __autoreleasing *)error
+{
+#if defined(MUSEREADER_USE_SCORE_RENDER_CORE) && MUSEREADER_USE_SCORE_RENDER_CORE
+    if (!_session) {
+        if (error) {
+            *error = FailureError(@"The MuseScore render session is no longer available.");
+        }
+        return nil;
+    }
+
+    msr::render::ScoreEditState editState;
+    std::string errorMessage;
+    if (!_session->insertPercussionNote(static_cast<int>(pageIndex), normalizedX, normalizedY,
+                                       static_cast<int>(midiPitch), editState, errorMessage)) {
+        if (error) {
+            *error = FailureError(FailureMessage(errorMessage, @"The MuseScore render core could not place that percussion note there."));
         }
         return nil;
     }
@@ -3221,6 +3481,41 @@ MSREditState *MakeEditState(const msr::render::ScoreEditState& editState)
                                     errorMessage)) {
         if (error) {
             *error = FailureError(FailureMessage(errorMessage, @"The MuseScore render core could not preview note entry there."));
+        }
+        return nil;
+    }
+
+    return MakeNoteEntryPreviewInfo(previewState);
+#else
+    if (error) {
+        *error = UnavailableError(@"This build of Aria is not linked to MuseScore editing support yet.");
+    }
+    return nil;
+#endif
+}
+
+- (MSRNoteEntryPreviewInfo *)percussionNoteEntryPreviewAtPageIndex:(NSInteger)pageIndex
+                                                      normalizedX:(double)normalizedX
+                                                      normalizedY:(double)normalizedY
+                                                     durationCode:(NSInteger)durationCode
+                                                        midiPitch:(NSInteger)midiPitch
+                                                            error:(NSError * _Nullable __autoreleasing *)error
+{
+#if defined(MUSEREADER_USE_SCORE_RENDER_CORE) && MUSEREADER_USE_SCORE_RENDER_CORE
+    if (!_session) {
+        if (error) {
+            *error = FailureError(@"The MuseScore render session is no longer available.");
+        }
+        return nil;
+    }
+
+    msr::render::NoteEntryPreviewState previewState;
+    std::string errorMessage;
+    if (!_session->percussionNoteEntryPreview(static_cast<int>(pageIndex), normalizedX, normalizedY,
+                                             static_cast<int>(durationCode), static_cast<int>(midiPitch),
+                                             previewState, errorMessage)) {
+        if (error) {
+            *error = FailureError(FailureMessage(errorMessage, @"The MuseScore render core could not preview percussion entry there."));
         }
         return nil;
     }

@@ -528,6 +528,27 @@ bool msr::render::ScoreRenderSession::insertNoteWithPitch(const int pageIndex,
     return m_impl->insertNoteWithPitch(pageIndex, normalizedX, normalizedY, pitchClass, preferFlats, output, errorMessage);
 }
 
+bool msr::render::ScoreRenderSession::insertPercussionNote(const int pageIndex,
+                                                           const double normalizedX,
+                                                           const double normalizedY,
+                                                           const int midiPitch,
+                                                           ScoreEditState& output,
+                                                           std::string& errorMessage)
+{
+    return m_impl->insertPercussionNote(pageIndex, normalizedX, normalizedY, midiPitch, output, errorMessage);
+}
+
+bool msr::render::ScoreRenderSession::percussionNoteEntryPreview(const int pageIndex,
+                                                                const double normalizedX,
+                                                                const double normalizedY,
+                                                                const int durationCode,
+                                                                const int midiPitch,
+                                                                NoteEntryPreviewState& output,
+                                                                std::string& errorMessage)
+{
+    return m_impl->noteEntryPreview(pageIndex, normalizedX, normalizedY, durationCode, false, -1, output, errorMessage, midiPitch);
+}
+
 bool msr::render::ScoreRenderSession::insertPitchAtCursor(const int pitchClass,
                                                           const bool preferFlats,
                                                           const bool addToCurrentChord,
@@ -914,4 +935,21 @@ bool msr::render::ScoreRenderCore::renderDocument(const RenderRequest& request,
     }
 
     return true;
+}
+
+bool msr::render::ScoreRenderSession::handwritingContext(const int voice, HandwritingContext& output, std::string& errorMessage)
+{
+    return m_impl->handwritingContext(voice, output, errorMessage);
+}
+
+bool msr::render::ScoreRenderSession::previewHandwriting(const std::string& token, const std::vector<HandwritingEvent>& events,
+                                                        RenderedPage& output, std::string& errorMessage)
+{
+    return m_impl->previewHandwriting(token, events, output, errorMessage);
+}
+
+bool msr::render::ScoreRenderSession::applyHandwriting(const std::string& token, const std::vector<HandwritingEvent>& events,
+                                                      ScoreEditState& output, std::string& errorMessage)
+{
+    return m_impl->applyHandwriting(token, events, output, errorMessage);
 }
