@@ -936,3 +936,20 @@ bool msr::render::ScoreRenderCore::renderDocument(const RenderRequest& request,
 
     return true;
 }
+
+bool msr::render::ScoreRenderSession::handwritingContext(const int voice, HandwritingContext& output, std::string& errorMessage)
+{
+    return m_impl->handwritingContext(voice, output, errorMessage);
+}
+
+bool msr::render::ScoreRenderSession::previewHandwriting(const std::string& token, const std::vector<HandwritingEvent>& events,
+                                                        RenderedPage& output, std::string& errorMessage)
+{
+    return m_impl->previewHandwriting(token, events, output, errorMessage);
+}
+
+bool msr::render::ScoreRenderSession::applyHandwriting(const std::string& token, const std::vector<HandwritingEvent>& events,
+                                                      ScoreEditState& output, std::string& errorMessage)
+{
+    return m_impl->applyHandwriting(token, events, output, errorMessage);
+}

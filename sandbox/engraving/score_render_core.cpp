@@ -181,6 +181,7 @@ void yieldFluidSynthLockToRealtime()
 #include "score_render_corruption.cpp"
 #include "score_render_edit_state.cpp"
 #include "score_render_edit_commands.cpp"
+#include "score_render_handwriting.cpp"
 #include "score_render_playback.cpp"
 #include "score_render_export.cpp"
 #include "score_render_pages.cpp"

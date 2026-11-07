@@ -164,6 +164,7 @@ final class ScoreReaderState {
     var isCountingIn = false
     var countInBeatNumber: Int?
     var editingState: ScoreEditingState = .inactive
+    var scoreMutationRevision = 0
     var measureRangePreviewSelection: ScoreSelectedElement?
     var editingErrorMessage: String?
     var autosaveFailureMessage: String? {

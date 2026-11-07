@@ -9,6 +9,14 @@ import SwiftUI
 struct OpenSourceLegalView: View {
     @Environment(\.dismiss) var dismiss
 
+    private var sourceRepository: String {
+        #if os(Android)
+        return "hdi200/aria"
+        #else
+        return "denismpa/magistris"
+        #endif
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -16,8 +24,8 @@ struct OpenSourceLegalView: View {
                     LegalSection(title: LibraryBrand.displayName) {
                         Text("This app includes MuseScore Studio-derived notation, engraving, MusicXML, playback, and render-core code. MuseScore Studio is licensed under the GNU General Public License version 3.")
                         Text("The source code for the corresponding release is available with the public source release for this app.")
-                        Link(destination: URL(string: "https://github.com/hdi200/aria")!) {
-                            Label("github.com/hdi200/aria", systemImage: "arrow.up.right.square")
+                        Link(destination: URL(string: "https://github.com/\(sourceRepository)")!) {
+                            Label("github.com/\(sourceRepository)", systemImage: "arrow.up.right.square")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.blue)
                         }
@@ -25,6 +33,9 @@ struct OpenSourceLegalView: View {
                     }
 
                     LegalSection(title: "Core Licenses") {
+                        #if !os(Android)
+                        LegalNoticeRow(name: "Magistris handwriting recognizer", detail: "MIT")
+                        #endif
                         LegalNoticeRow(name: "MuseScore Studio", detail: "GPLv3")
                         LegalNoticeRow(name: "Qt Framework", detail: "See bundled Qt notice for release-specific license terms")
                         LegalNoticeRow(name: "FluidSynth", detail: "LGPL 2.1")

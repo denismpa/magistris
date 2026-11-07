@@ -316,6 +316,9 @@ struct ScoreReaderView: View {
     @State var dismissedSelectionCommandIdentity: String?
     #endif
     @State var pencilAutoNoteEntryAllowed = true
+    #if !os(Android)
+    @State var writeController = ScoreReaderWriteController()
+    #endif
     @State var zoomScaleBeforeTextEntry: CGFloat?
     @State var isClosingScore = false
     @State var isTransitioningScore = false
@@ -682,102 +685,26 @@ struct ScoreReaderView: View {
     @ViewBuilder
     private var noteEntryOverlay: some View {
         if readerState.isEditingMode && !plainTextEditorIsActive {
-            ScoreReaderNoteEntrySurface(
-                editingState: readerState.editingState,
-                pendingPitchClass: readerState.pendingPitchClass,
-                pendingMIDIPitch: readerState.pendingMIDIPitch,
-                selectedPercussionPitch: readerState.selectedPercussionPitch,
-                selectPercussionInstrumentAction: readerState.selectPercussionInstrument,
-                enterPercussionNoteAction: readerState.enterSelectedPercussionNote,
-                stackedChordInputEnabled: readerState.stackedChordInputEnabled,
-                showsCompactModeToolbar: !isPhoneInterface,
-                placesModeToolbarAbove: placesPhoneModeBarAboveEntry,
-                isBusy: readerState.isEditingActionInFlight,
-                errorText: nil,
-                selectModeAction: selectModeFromToolbar,
-                noteInputModeAction: noteInputModeFromToolbar,
-                deleteSelectionAction: readerState.deleteSelection,
-                clearSelectedMeasureAction: readerState.clearSelectedMeasure,
-                removeSelectedMeasureAction: readerState.removeSelectedMeasure,
-                addMeasureAction: readerState.addMeasure,
-                addMultipleMeasuresAction: { isAddMeasuresPresented = true },
-                copySelectedMeasureRangeAction: readerState.copySelectedMeasureRange,
-                cutSelectedMeasureRangeAction: readerState.cutSelectedMeasureRange,
-                pasteMeasureRangeAction: readerState.pasteMeasureRange,
-                selectPreviousElementAction: {
-                    if selectedToolCategory == .chord { readerState.selectAdjacentChordText(next: false) }
-                    else { readerState.selectPreviousElement() }
-                },
-                selectNextElementAction: {
-                    if selectedToolCategory == .chord { readerState.selectAdjacentChordText(next: true) }
-                    else { readerState.selectNextElement() }
-                },
-                undoAction: readerState.undoEdit,
-                redoAction: readerState.redoEdit,
-                setCurrentVoiceAction: readerState.setCurrentVoice,
-                selectedToolCategory: $selectedToolCategory,
-                pendingAccidentalKind: readerState.pendingAccidentalKind,
-                applyDurationAction: readerState.applyDuration,
-                toggleDotAction: readerState.toggleDot,
-                toggleRestAction: readerState.toggleRest,
-                toggleTieAction: readerState.toggleTie,
-                addTupletAction: readerState.addTuplet,
-                moreNoteToolAction: readerState.applyMoreNoteTool,
-                toggleStackedChordInputAction: readerState.toggleStackedChordInput,
-                editSelectedTextAction: presentTextEditor,
-                addTextAction: readerState.addText,
-                addChordTextAction: readerState.addChordText,
-                addChordTextAndSelectNextAction: readerState.addChordTextAndSelectNext,
-                addChordTextAndSelectPreviousAction: { readerState.addChordTextAndSelectAdjacent($0, next: false) },
-                removeChordTextAction: { readerState.removeChordText(thenSelectNext: $0) },
-                openLyricsEntryAction: openLyricsEntry,
-                openFingeringAction: openFingeringEntry,
-                setFingeringAction: readerState.setFingering,
-                addLyricsTextAction: readerState.addLyricsText,
-                addLyricsHyphenAction: readerState.addLyricsHyphen,
-                addLyricsMelismaAction: readerState.addLyricsMelisma,
-                addRepeatJumpAction: readerState.addRepeatJump,
-                addExpressionAction: readerState.addExpression,
-                addLayoutBreakAction: requestLayoutBreak,
-                removeLayoutBreakAction: readerState.removeLayoutBreak,
-                updateLayoutOptionsAction: readerState.updateLayoutOptions,
-                fillSelectionWithSlashesAction: readerState.fillSelectionWithSlashes,
-                replaceSelectionWithRhythmicSlashesAction: readerState.replaceSelectionWithRhythmicSlashes,
-                openAddInstrumentAction: {
-                    instrumentsToAdd = []
-                    if currentScoreInstruments.isEmpty {
-                        currentScoreInstruments = scoreInstrumentsFromDocumentParts()
+            VStack(spacing: 0) {
+                #if !os(Android)
+                if !isPhoneDevice {
+                    if writeController.isActive {
+                        ScoreReaderWritePanel(
+                            controller: writeController,
+                            isEditingBusy: readerState.isEditingActionInFlight,
+                            convertAction: { writeController.convert(in: readerState) }
+                        )
+                    } else {
+                        writeLaunchStrip
                     }
-                    isAddInstrumentPresented = true
-                },
-                openTransposeScoreAction: openTransposeScoreSheet,
-                removeSelectedInstrumentAction: readerState.removeSelectedInstrument,
-                openClefEditorAction: { isClefPickerPresented = true },
-                openAutoBreaksAction: { isAutoBreaksPresented = true },
-                openInstrumentLayoutAction: {
-                    instrumentLayoutParts = displayedScoreParts
-                    isInstrumentLayoutPresented = true
-                },
-                openPageSettingsAction: { isPageSettingsPresented = true },
-                openScoreSetupAction: { isScoreSetupPresented = true },
-                openTempoEditorAction: { isTempoEditorPresented = true },
-                openTimeSignatureAction: { isTimeSignaturePresented = true },
-                openKeySignatureAction: { isKeySignaturePresented = true },
-                openPickupMeasureAction: { readerState.presentPickupEditor(createNewMeasure: false) },
-                openCreatePickupMeasureAction: { readerState.presentPickupEditor(createNewMeasure: true) },
-                concertPitchEnabled: readerState.concertPitchEnabled,
-                showsConcertPitchControl: showsConcertPitchControl,
-                toggleConcertPitchAction: readerState.toggleConcertPitch,
-                setKeyboardPitchAction: { pitchClass, midiPitch, preferFlats in
-                    readerState.handleKeyboardPitch(pitchClass, midiPitch: midiPitch, preferFlats: preferFlats, exactMIDIPitch: true)
-                },
-                setPitchClassAction: readerState.handleKeyboardPitchClass,
-                prepareAccidentalAction: readerState.prepareAccidental,
-                changeAccidentalAction: readerState.changeSelectedAccidental,
-                removeChordPitchAction: readerState.removeMIDIPitchFromCurrentChord,
-                semitoneShiftAction: readerState.shiftPitchBySemitones,
-                octaveShiftAction: readerState.shiftPitchByOctaves
-            )
+                }
+                if !writeController.isActive {
+                    standardNoteEntrySurface
+                }
+                #else
+                standardNoteEntrySurface
+                #endif
+            }
             .padding(.bottom, 0)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .background(
@@ -791,6 +718,138 @@ struct ScoreReaderView: View {
             )
         }
     }
+
+    private var standardNoteEntrySurface: some View {
+        ScoreReaderNoteEntrySurface(
+            editingState: readerState.editingState,
+            pendingPitchClass: readerState.pendingPitchClass,
+            pendingMIDIPitch: readerState.pendingMIDIPitch,
+            selectedPercussionPitch: readerState.selectedPercussionPitch,
+            selectPercussionInstrumentAction: readerState.selectPercussionInstrument,
+            enterPercussionNoteAction: readerState.enterSelectedPercussionNote,
+            stackedChordInputEnabled: readerState.stackedChordInputEnabled,
+            showsCompactModeToolbar: !isPhoneInterface,
+            placesModeToolbarAbove: placesPhoneModeBarAboveEntry,
+            isBusy: readerState.isEditingActionInFlight,
+            errorText: nil,
+            selectModeAction: selectModeFromToolbar,
+            noteInputModeAction: noteInputModeFromToolbar,
+            deleteSelectionAction: readerState.deleteSelection,
+            clearSelectedMeasureAction: readerState.clearSelectedMeasure,
+            removeSelectedMeasureAction: readerState.removeSelectedMeasure,
+            addMeasureAction: readerState.addMeasure,
+            addMultipleMeasuresAction: { isAddMeasuresPresented = true },
+            copySelectedMeasureRangeAction: readerState.copySelectedMeasureRange,
+            cutSelectedMeasureRangeAction: readerState.cutSelectedMeasureRange,
+            pasteMeasureRangeAction: readerState.pasteMeasureRange,
+            selectPreviousElementAction: {
+                if selectedToolCategory == .chord { readerState.selectAdjacentChordText(next: false) }
+                else { readerState.selectPreviousElement() }
+            },
+            selectNextElementAction: {
+                if selectedToolCategory == .chord { readerState.selectAdjacentChordText(next: true) }
+                else { readerState.selectNextElement() }
+            },
+            undoAction: readerState.undoEdit,
+            redoAction: readerState.redoEdit,
+            setCurrentVoiceAction: readerState.setCurrentVoice,
+            selectedToolCategory: $selectedToolCategory,
+            pendingAccidentalKind: readerState.pendingAccidentalKind,
+            applyDurationAction: readerState.applyDuration,
+            toggleDotAction: readerState.toggleDot,
+            toggleRestAction: readerState.toggleRest,
+            toggleTieAction: readerState.toggleTie,
+            addTupletAction: readerState.addTuplet,
+            moreNoteToolAction: readerState.applyMoreNoteTool,
+            toggleStackedChordInputAction: readerState.toggleStackedChordInput,
+            editSelectedTextAction: presentTextEditor,
+            addTextAction: readerState.addText,
+            addChordTextAction: readerState.addChordText,
+            addChordTextAndSelectNextAction: readerState.addChordTextAndSelectNext,
+            addChordTextAndSelectPreviousAction: { readerState.addChordTextAndSelectAdjacent($0, next: false) },
+            removeChordTextAction: { readerState.removeChordText(thenSelectNext: $0) },
+            openLyricsEntryAction: openLyricsEntry,
+            openFingeringAction: openFingeringEntry,
+            setFingeringAction: readerState.setFingering,
+            addLyricsTextAction: readerState.addLyricsText,
+            addLyricsHyphenAction: readerState.addLyricsHyphen,
+            addLyricsMelismaAction: readerState.addLyricsMelisma,
+            addRepeatJumpAction: readerState.addRepeatJump,
+            addExpressionAction: readerState.addExpression,
+            addLayoutBreakAction: requestLayoutBreak,
+            removeLayoutBreakAction: readerState.removeLayoutBreak,
+            updateLayoutOptionsAction: readerState.updateLayoutOptions,
+            fillSelectionWithSlashesAction: readerState.fillSelectionWithSlashes,
+            replaceSelectionWithRhythmicSlashesAction: readerState.replaceSelectionWithRhythmicSlashes,
+            openAddInstrumentAction: {
+                instrumentsToAdd = []
+                if currentScoreInstruments.isEmpty {
+                    currentScoreInstruments = scoreInstrumentsFromDocumentParts()
+                }
+                isAddInstrumentPresented = true
+            },
+            openTransposeScoreAction: openTransposeScoreSheet,
+            removeSelectedInstrumentAction: readerState.removeSelectedInstrument,
+            openClefEditorAction: { isClefPickerPresented = true },
+            openAutoBreaksAction: { isAutoBreaksPresented = true },
+            openInstrumentLayoutAction: {
+                instrumentLayoutParts = displayedScoreParts
+                isInstrumentLayoutPresented = true
+            },
+            openPageSettingsAction: { isPageSettingsPresented = true },
+            openScoreSetupAction: { isScoreSetupPresented = true },
+            openTempoEditorAction: { isTempoEditorPresented = true },
+            openTimeSignatureAction: { isTimeSignaturePresented = true },
+            openKeySignatureAction: { isKeySignaturePresented = true },
+            openPickupMeasureAction: { readerState.presentPickupEditor(createNewMeasure: false) },
+            openCreatePickupMeasureAction: { readerState.presentPickupEditor(createNewMeasure: true) },
+            concertPitchEnabled: readerState.concertPitchEnabled,
+            showsConcertPitchControl: showsConcertPitchControl,
+            toggleConcertPitchAction: readerState.toggleConcertPitch,
+            setKeyboardPitchAction: { pitchClass, midiPitch, preferFlats in
+                readerState.handleKeyboardPitch(pitchClass, midiPitch: midiPitch, preferFlats: preferFlats, exactMIDIPitch: true)
+            },
+            setPitchClassAction: readerState.handleKeyboardPitchClass,
+            prepareAccidentalAction: readerState.prepareAccidental,
+            changeAccidentalAction: readerState.changeSelectedAccidental,
+            removeChordPitchAction: readerState.removeMIDIPitchFromCurrentChord,
+            semitoneShiftAction: readerState.shiftPitchBySemitones,
+            octaveShiftAction: readerState.shiftPitchByOctaves
+        )
+    }
+
+    #if !os(Android)
+    private var writeLaunchStrip: some View {
+        HStack(spacing: 12) {
+            Text(writeController.message ?? "Select an empty bar to handwrite with Apple Pencil.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Button("Write", systemImage: "pencil.tip", action: beginWriting)
+                .buttonStyle(.bordered)
+                .disabled(readerState.isEditingActionInFlight || readerState.partSelectionTask != nil)
+                .accessibilityIdentifier("score.write.begin")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
+    }
+
+    private func beginWriting() {
+        guard !isPhoneDevice, !readerState.isEditingActionInFlight else { return }
+        clearSelectionCommandMenu()
+        exitTextEntryFocusIfNeeded()
+        selectedToolCategory = .select
+        pencilAutoNoteEntryAllowed = false
+        readerState.noteInputWasActivatedByPencil = false
+        writeController.begin(in: readerState)
+    }
+
+    private func invalidateWriting(_ reason: String) {
+        guard writeController.isActive, !writeController.isConverting else { return }
+        writeController.cancel(message: reason)
+    }
+    #endif
 
     /// The editing deck, moved to its own side of the fold on an unfolded Duo.
     @ViewBuilder
@@ -1035,6 +1094,9 @@ struct ScoreReaderView: View {
             }
         }
         .onDisappear {
+            #if !os(Android)
+            writeController.cancel()
+            #endif
             unlockPhoneOrientation()
             saveRememberedReaderState()
             annotationController.flushSave()
@@ -1047,6 +1109,9 @@ struct ScoreReaderView: View {
         .onChangeCompatible(of: scenePhase) { phase in
             switch phase {
             case .inactive, .background:
+                #if !os(Android)
+                writeController.cancelActiveStroke()
+                #endif
                 readerState.saveRecoverySnapshotForBackground()
             case .active:
                 readerState.resumeAutosaveAfterBackground()
@@ -1061,6 +1126,23 @@ struct ScoreReaderView: View {
                 annotationController.anchorPendingStrokes(partID: selectedPartID, regions: regions)
             }) })
         #else
+        .onChangeCompatible(of: readerState.scoreMutationRevision) { _ in
+            invalidateWriting("Writing ended because the score changed. Select an empty bar to start again.")
+        }
+        .onChangeCompatible(of: readerState.partSelectionRevision) { _ in
+            invalidateWriting("Writing ended because the displayed part changed.")
+        }
+        .onChangeCompatible(of: readerState.editingState.currentVoice) { _ in
+            invalidateWriting("Writing ended because the selected voice changed.")
+        }
+        .onChangeCompatible(of: readerState.editingState.selection?.normalizedRect) { _ in
+            if !writeController.isPreparing {
+                invalidateWriting("Writing ended because the selection changed.")
+            }
+        }
+        .onChangeCompatible(of: readerState.concertPitchEnabled) { _ in
+            invalidateWriting("Writing ended because the displayed pitch changed.")
+        }
         .onChangeCompatible(of: readerState.editingState.noteInputEnabled) { noteInputEnabled in
             selectedToolCategory = ScoreReaderToolModePolicy.category(
                 afterSettingNoteInputEnabled: noteInputEnabled,
@@ -1081,6 +1163,9 @@ struct ScoreReaderView: View {
             updatePhoneOrientation(for: mode)
             isChromeVisible = true
             if mode != .edit {
+                #if !os(Android)
+                invalidateWriting("Writing ended when the editor closed.")
+                #endif
                 selectedToolCategory = .select
                 clearSelectionCommandMenu()
                 zoomScaleBeforeTextEntry = nil
@@ -1099,9 +1184,15 @@ struct ScoreReaderView: View {
             }
         }
         .onChangeCompatible(of: readerState.viewTransposeKey) { _ in
+            #if !os(Android)
+            invalidateWriting("Writing ended because the displayed pitch changed.")
+            #endif
             saveRememberedReaderState()
         }
         .onChangeCompatible(of: readerState.selectedPageIndex) { _ in
+            #if !os(Android)
+            invalidateWriting("Writing ended because the displayed page changed.")
+            #endif
             saveRememberedReaderState()
         }
         .onChangeCompatible(of: selectedPartID) { _ in
@@ -1410,6 +1501,9 @@ struct ScoreReaderView: View {
     }
 
     private var floatingToolCategory: ScoreReaderToolCategory? {
+        #if !os(Android)
+        if writeController.isActive { return nil }
+        #endif
         guard !isPhoneInterface else {
             return nil
         }
@@ -2410,6 +2504,10 @@ struct ScoreReaderView: View {
             },
             annotationConfiguration: annotationConfiguration(for: pageIndex)
         )
+        #if !os(Android)
+        .environment(\.scoreReaderWriteController, writeController)
+        .environment(\.scoreReaderWritePageIndex, pageIndex)
+        #endif
         #if os(Android)
         .environment(\.ariaPlaybackPageIndex, pageIndex)
         .environment(\.ariaRasterVisible, isActivePage)
@@ -2698,6 +2796,9 @@ struct ScoreReaderView: View {
             return false
         }
 
+        #if !os(Android)
+        if writeController.isActive { return true }
+        #endif
         return textEntryFocusIsActive || selectedToolCategory == .chord || selectedToolCategory == .fingering || readerState.editingState.noteInputEnabled
     }
 
@@ -3764,11 +3865,17 @@ struct ScoreReaderView: View {
     }
 
     private func activatePencilNoteEntryMode() {
+        #if !os(Android)
+        guard !writeController.isActive else { return }
+        #endif
         guard pencilAutoNoteEntryAllowed, readerState.activatePencilNoteEntry() else { return }
         selectedToolCategory = .notes
     }
 
     private func selectModeFromToolbar() {
+        #if !os(Android)
+        writeController.cancel()
+        #endif
         pencilAutoNoteEntryAllowed = ScoreReaderToolModePolicy.allowsAutomaticPencilNoteEntry(after: .chooseSelect)
         readerState.noteInputWasActivatedByPencil = false
         readerState.setNoteInputEnabled(false)
@@ -3776,6 +3883,9 @@ struct ScoreReaderView: View {
     }
 
     private func noteInputModeFromToolbar() {
+        #if !os(Android)
+        writeController.cancel()
+        #endif
         pencilAutoNoteEntryAllowed = ScoreReaderToolModePolicy.allowsAutomaticPencilNoteEntry(after: .chooseNoteInput)
         readerState.noteInputWasActivatedByPencil = false
         readerState.setNoteInputEnabled(true)

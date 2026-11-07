@@ -2,6 +2,10 @@
 
 Aria includes code and assets from the MuseScore Studio source tree and several third-party projects. This file is a release-facing notice summary; keep the original license files with the source release and in the app bundle.
 
+## Magistris Handwriting Recognizer
+
+The original recognition module in `MuseReaderiOS/Models/Handwriting/MusicInkRecognizer.swift` is available separately under the MIT license. Its license is included beside the source and in `Resources/Legal/Magistris-Handwriting-MIT.txt`. It uses geometric analysis of pen strokes and has no model weights or external training dataset. The application and its MuseScore integration are distributed under their existing licenses.
+
 ## MuseScore Studio
 
 - Component: MuseScore Studio notation, engraving, MusicXML, playback, and render-core-derived code.

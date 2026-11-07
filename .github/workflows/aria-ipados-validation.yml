@@ -18,6 +18,18 @@ jobs:
           lfs: true
           persist-credentials: false
 
+      - name: Check the original handwriting recognizer
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc -swift-version 5 -default-isolation MainActor \
+            -enable-upcoming-feature NonisolatedNonsendingByDefault \
+            -module-cache-path "$RUNNER_TEMP/music-ink-module-cache" \
+            MuseReaderiOS/MuseReaderiOS/Models/Handwriting/MusicInkRecognizer.swift \
+            MuseReaderiOS/Checks/MusicInkRecognizerChecks.swift \
+            -o "$RUNNER_TEMP/music-ink-checks"
+          "$RUNNER_TEMP/music-ink-checks"
+
       - name: Install the matching Qt SDKs
         shell: bash
         run: |

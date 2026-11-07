@@ -1634,6 +1634,155 @@ void testRestEntryAdvances(const std::filesystem::path& root)
            + " quarter rests in the bar (4 when each press advances)");
 }
 
+void preserveHandwritingArtifacts(msr::render::ScoreRenderSession& session,
+                                  const msr::render::RenderedPage& preview,
+                                  const std::string& name)
+{
+    const char* requested = std::getenv("ARIA_HANDWRITING_TEST_ARTIFACT_DIR");
+    if (!requested || !*requested) {
+        return;
+    }
+    const auto directory = std::filesystem::absolute(requested);
+    std::filesystem::create_directories(directory);
+    std::string error;
+    expect(session.saveToPath((directory / (name + ".mscz")).string(), error), "Could not preserve the handwritten score: " + error);
+    std::ofstream image(directory / (name + "-preview.png"), std::ios::binary);
+    image.write(reinterpret_cast<const char*>(preview.pngData.data()), static_cast<std::streamsize>(preview.pngData.size()));
+    expect(image.good(), "Could not preserve the native handwriting preview");
+}
+
+void testHandwritingPreviewAndAtomicApply(const std::filesystem::path& testRoot)
+{
+    const auto root = testRoot / "handwriting-atomic";
+    std::filesystem::create_directories(root);
+    auto session = openSession(root, "handwriting-atomic", scoreXml(0, { { 60, 14 } }, 2));
+    const auto rest = restsByX(scanScore(*session, { 60 }, 2)).front();
+    auto state = selectAt(*session, rest);
+    std::string error;
+    const auto original = saveSnapshot(*session, root, "handwriting-original");
+    msr::render::HandwritingContext context;
+    expect(session->handwritingContext(0, context, error), "Could not get the empty writing target: " + error);
+    expect(context.clef == "treble" && context.durationTicks == 1920 && context.measureStartTick == 1920
+           && context.staffHalfStepNormalizedY > 0.0 && context.inputEndNormalizedX > context.inputStartNormalizedX,
+           "The writing target omitted its geometry or actual meter");
+    msr::render::HandwritingContext repeated;
+    expect(session->handwritingContext(0, repeated, error) && repeated.token == context.token, "An unchanged writing target got a new token");
+    const std::vector<msr::render::HandwritingEvent> events = {
+        { -1, 4, 0, 8, -1, false }, { 480, 4, 0, 4, -1, true }, { 960, 2, 0, 6, -1, false }
+    };
+    std::vector<std::string> beforeLayout;
+    expect(session->layoutFingerprint(beforeLayout, error), "Could not inspect the initial page: " + error);
+    const bool couldUndo = state.canUndo;
+    msr::render::RenderedPage preview;
+    expect(session->previewHandwriting(context.token, events, preview, error), "Could not engrave the handwriting preview: " + error);
+    expect(!preview.pngData.empty() && preview.pixelWidth > 0 && preview.pixelHeight > 0 && preview.pixelHeight < 400,
+           "The writing preview was not cropped to the actual bar");
+    auto highEvents = events;
+    highEvents.front().staffLine = -10;
+    msr::render::RenderedPage highPreview;
+    expect(session->previewHandwriting(context.token, highEvents, highPreview, error) && highPreview.pixelHeight > preview.pixelHeight,
+           "The preview reused the old bar geometry and clipped high ledger notes");
+    expect(session->currentEditState(state, error) && state.canUndo == couldUndo, "The preview added an undo command");
+    std::vector<std::string> afterLayout;
+    expect(session->layoutFingerprint(afterLayout, error) && beforeLayout == afterLayout, "The preview changed the active page");
+    expect(saveSnapshot(*session, root, "handwriting-after-preview") == original, "The preview changed the saved score");
+
+    expect(session->applyHandwriting(context.token, events, state, error), "Could not apply the handwriting proposal: " + error);
+    const auto applied = saveSnapshot(*session, root, "handwriting-applied");
+    expect(countOccurrences(applied, "<pitch>64</pitch>") == 1 && countOccurrences(applied, "<pitch>67</pitch>") == 1,
+           "The written staff positions did not become the expected notes");
+    expect(session->undo(state, error), "Could not undo the handwriting batch: " + error);
+    expect(saveSnapshot(*session, root, "handwriting-undone") == original, "One undo did not restore the entire bar");
+    expect(session->redo(state, error), "Could not redo the handwriting batch: " + error);
+    expect(saveSnapshot(*session, root, "handwriting-redone") == applied, "Redo did not restore the whole handwriting batch");
+    preserveHandwritingArtifacts(*session, preview, "handwriting-treble");
+    expect(!session->applyHandwriting(context.token, events, state, error), "A consumed handwriting target was reused");
+    const auto path = root / "handwriting.mscz";
+    expect(session->saveToPath(path.string(), error), "Could not save the handwritten MSCZ: " + error);
+    auto reopened = msr::render::ScoreRenderSession::open(path.string(), error);
+    expect(reopened != nullptr, "Could not reopen the handwritten MSCZ: " + error);
+    const auto saved = saveSnapshot(*reopened, root, "handwriting-reopened");
+    expect(saved.find(R"(<museScore version="4.70">)") != std::string::npos
+           && countOccurrences(saved, "<pitch>64</pitch>") == 1 && countOccurrences(saved, "<pitch>67</pitch>") == 1,
+           "The handwritten MSCZ lost its notes or changed format");
+}
+
+void testHandwritingRejectsInvalidAndRollsBack(const std::filesystem::path& testRoot)
+{
+    const auto root = testRoot / "handwriting-invalid";
+    std::filesystem::create_directories(root);
+    auto session = openSession(root, "handwriting-invalid", scoreXml(0, { { 60, 14 } }, 2));
+    auto items = scanScore(*session, { 60 }, 2);
+    selectAt(*session, noteWithPitch(items, 60));
+    std::string error;
+    msr::render::HandwritingContext context;
+    expect(!session->handwritingContext(0, context, error), "Write mode accepted a bar containing a note");
+    selectAt(*session, restsByX(items).front());
+    expect(session->handwritingContext(0, context, error), "Could not get the empty bar context: " + error);
+    const auto original = saveSnapshot(*session, root, "handwriting-invalid-original");
+    const std::vector<msr::render::HandwritingEvent> overflow = { { 0, 1, 1, 8, -1, false } };
+    msr::render::ScoreEditState state;
+    expect(!session->applyHandwriting(context.token, overflow, state, error), "An overflowing rhythm was accepted");
+    const std::vector<msr::render::HandwritingEvent> gap = { { 0, 4, 0, 8, -1, false }, { 960, 4, 0, 6, -1, false } };
+    expect(!session->applyHandwriting(context.token, gap, state, error), "A proposal containing an unsupported gap was accepted");
+    // The second note fails only after the first note has reached setNoteRest.
+    const std::vector<msr::render::HandwritingEvent> lateFailure = { { 0, 4, 0, 8, -1, false }, { -1, 4, 0, -100, -1, false } };
+    expect(!session->applyHandwriting(context.token, lateFailure, state, error), "An out-of-range second note was accepted");
+    expect(saveSnapshot(*session, root, "handwriting-invalid-after") == original, "A failed batch left a partial first note");
+    const std::vector<msr::render::HandwritingEvent> valid = { { 0, 4, 0, 8, -1, false } };
+    expect(session->applyHandwriting(context.token, valid, state, error), "A rolled-back proposal invalidated the empty bar: " + error);
+    expect(session->undo(state, error), "The successful retry could not be undone: " + error);
+    expect(saveSnapshot(*session, root, "handwriting-invalid-retry-undone") == original, "Retry left an extra undo command or changed the source");
+}
+
+void testHandwritingKeyBassAndLinkedPart(const std::filesystem::path& testRoot)
+{
+    const auto root = testRoot / "handwriting-bass-part";
+    std::filesystem::create_directories(root);
+    auto bassXml = scoreXml(2, { { 48, 14 } }, 1);
+    const auto clef = bassXml.find("<concertClefType>G</concertClefType>");
+    bassXml.replace(clef, std::string("<concertClefType>G</concertClefType>").size(),
+                    "<concertClefType>F</concertClefType><transposingClefType>F</transposingClefType>");
+    auto session = openSession(root, "handwriting-bass-part", bassXml);
+    const auto rest = restsByX(scanScore(*session, { 48 }, 1)).front();
+    selectAt(*session, rest);
+    std::string error;
+    msr::render::HandwritingContext context;
+    expect(session->handwritingContext(1, context, error) && context.clef == "bass" && context.key == 2,
+           "Bass context did not include its clef, key, or explicit voice: " + error);
+    const std::vector<msr::render::HandwritingEvent> events = { { -1, 4, 1, 9, -1, false }, { -1, 8, 0, 9, 0, false } };
+    msr::render::RenderedPage preview;
+    const auto original = saveSnapshot(*session, root, "handwriting-bass-original");
+    expect(session->previewHandwriting(context.token, events, preview, error), "Could not preview the bass staff: " + error);
+    expect(saveSnapshot(*session, root, "handwriting-bass-preview") == original, "Bass preview changed the original");
+    msr::render::ScoreEditState state;
+    expect(session->applyHandwriting(context.token, events, state, error), "Could not apply bass handwriting: " + error);
+    const auto applied = saveSnapshot(*session, root, "handwriting-bass-applied");
+    expect(applied.find("<pitch>42</pitch>") != std::string::npos && applied.find("<pitch>41</pitch>") != std::string::npos,
+           "Bass staff entry ignored the key signature or explicit natural");
+    preserveHandwritingArtifacts(*session, preview, "handwriting-bass");
+    expect(session->undo(state, error), "Could not undo bass handwriting: " + error);
+
+    int pages = 0;
+    expect(session->setActivePartIndex(0, pages, error), "Could not show the linked handwriting part: " + error);
+    expect(session->updateLayoutOptions(false, false, state, error), "Could not expand empty bars in the linked part: " + error);
+    const auto partRest = restsByX(scanScore(*session, { 48 }, 1)).front();
+    selectAt(*session, partRest);
+    expect(session->handwritingContext(1, context, error), "Could not target the empty linked part: " + error);
+    const auto beforePartPreview = saveSnapshot(*session, root, "handwriting-part-before-preview");
+    const bool couldUndo = state.canUndo;
+    expect(session->previewHandwriting(context.token, events, preview, error), "Could not preview linked-part handwriting: " + error);
+    expect(session->currentEditState(state, error) && state.canUndo == couldUndo
+           && saveSnapshot(*session, root, "handwriting-part-after-preview") == beforePartPreview,
+           "Linked-part preview mutated the source score or undo stack");
+    expect(session->applyHandwriting(context.token, events, state, error), "Could not apply linked-part handwriting: " + error);
+    expect(session->setActivePartIndex(std::nullopt, pages, error), "Could not return to the full handwriting score: " + error);
+    const auto master = saveSnapshot(*session, root, "handwriting-part-master");
+    expect(master.find("<pitch>42</pitch>") != std::string::npos && master.find("<pitch>41</pitch>") != std::string::npos,
+           "The linked-part handwriting did not reach the master score");
+    preserveHandwritingArtifacts(*session, preview, "handwriting-linked-part");
+}
+
 std::string percussionScoreXml(const bool singleLine)
 {
     std::ostringstream xml;
@@ -3128,6 +3277,19 @@ int main()
     passed &= runTest("tempo beat units reach linked parts", [&] { testTempoBeatUnitsReachLinkedParts(testDirectory.path); });
     passed &= runTest("tempo text preserves native playback and undo", [&] { testTempoTextKeepsNativePlaybackAndUndo(testDirectory.path); });
     passed &= runTest("transpose to key stays inside the selection", [&] { testTransposeToKeyStaysInsideTheSelection(testDirectory.path); });
+    passed &= runTest("handwriting rejects drum-kit and single-line percussion", [&] {
+        for (const bool singleLine : { false, true }) {
+            auto session = openSession(testDirectory.path, singleLine ? "handwriting-reject-one-line" : "handwriting-reject-kit",
+                                       percussionScoreXml(singleLine));
+            selectAt(*session, restsByX(scanScore(*session, {}, 2)).front());
+            msr::render::HandwritingContext context;
+            std::string error;
+            expect(!session->handwritingContext(0, context, error) && !error.empty(), "Write mode accepted a percussion staff");
+        }
+    });
+    passed &= runTest("handwriting preview is read-only and apply is one undo", [&] { testHandwritingPreviewAndAtomicApply(testDirectory.path); });
+    passed &= runTest("handwriting invalid proposals roll back atomically", [&] { testHandwritingRejectsInvalidAndRollsBack(testDirectory.path); });
+    passed &= runTest("handwriting handles bass keys voices and linked parts", [&] { testHandwritingKeyBassAndLinkedPart(testDirectory.path); });
     passed &= runTest("drum kit percussion entry preserves its custom mapping and MSCZ", [&] { testDrumKitPercussionEntry(testDirectory.path); });
     passed &= runTest("linked-part percussion entry reaches the full score", [&] { testLinkedPartPercussionEntry(testDirectory.path); });
     passed &= runTest("single-line percussion entry supports notes rests and edits", [&] { testSingleLinePercussionEntry(testDirectory.path); });

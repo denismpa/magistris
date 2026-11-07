@@ -903,6 +903,67 @@ actor LiveScoreRenderSession {
         return editState
     }
 
+    #if !os(Android)
+    func handwritingTargetForSelection() throws -> ScoreHandwritingTarget {
+        let state = try bridgeSession.currentEditingState()
+        let target = try bridgeSession.handwritingContext(voice: state.currentVoice)
+        return ScoreHandwritingTarget(
+            token: target.token,
+            pageIndex: target.pageIndex,
+            measureIndex: target.measureIndex,
+            staffIndex: target.staffIndex,
+            voice: target.voice,
+            measureStartTick: target.measureStartTick,
+            durationTicks: target.durationTicks,
+            timeSignatureNumerator: target.timeSignatureNumerator,
+            timeSignatureDenominator: target.timeSignatureDenominator,
+            clef: target.clef,
+            key: target.key,
+            measureRect: ScoreNormalizedRect(
+                x: target.measureRect.normalizedX, y: target.measureRect.normalizedY,
+                width: target.measureRect.normalizedWidth, height: target.measureRect.normalizedHeight
+            ),
+            staffTopNormalizedY: target.staffTopNormalizedY,
+            staffHalfStepNormalizedY: target.staffHalfStepNormalizedY,
+            inputStartNormalizedX: target.inputStartNormalizedX,
+            inputEndNormalizedX: target.inputEndNormalizedX
+        )
+    }
+
+    func previewHandwriting(_ events: [ScoreHandwritingEvent],
+                            target: ScoreHandwritingTarget) throws -> ScoreHandwritingPreview {
+        try Task.checkCancellation()
+        let page = try bridgeSession.previewHandwriting(
+            targetToken: target.token, events: handwritingBridgeEvents(events)
+        )
+        return ScoreHandwritingPreview(
+            pageIndex: page.pageIndex, pixelWidth: page.pixelWidth, pixelHeight: page.pixelHeight,
+            imageData: page.imageData
+        )
+    }
+
+    func commitHandwriting(_ events: [ScoreHandwritingEvent],
+                           target: ScoreHandwritingTarget) throws -> ScoreEditingState {
+        let state = try makeEditingState(
+            from: bridgeSession.applyHandwriting(
+                targetToken: target.token, events: handwritingBridgeEvents(events)
+            ),
+            refreshScope: .nearby
+        )
+        invalidateCachedPlaybackArtifacts()
+        return state
+    }
+
+    private func handwritingBridgeEvents(_ events: [ScoreHandwritingEvent]) -> [MSRHandwritingEventInfo] {
+        events.map { event in
+            MSRHandwritingEventInfo(
+                offsetTicks: event.offsetTicks, durationCode: event.durationCode, dots: event.dots,
+                staffLine: event.staffLine, accidentalKind: event.accidentalKind, rest: event.rest
+            )
+        }
+    }
+    #endif
+
     func insertNote(pageIndex: Int, normalizedPoint: CGPoint) throws -> ScoreEditingState {
         guard supportsEditing else {
             return inactiveEditingState()

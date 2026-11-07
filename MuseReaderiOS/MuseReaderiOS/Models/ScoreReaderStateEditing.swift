@@ -2352,6 +2352,7 @@ extension ScoreReaderState {
     }
 
     func refreshAfterScoreMutation(with editingState: ScoreEditingState, auditionNote: Bool = false, revealActiveNotation: Bool = false) {
+        scoreMutationRevision += 1
         #if os(Android) && ARIA_PHONE_AUDIT
         AndroidInteractionTrace.point("refresh_mutation_begin")
         #endif
